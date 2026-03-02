@@ -1435,6 +1435,20 @@ async fn sync_from_folder(
             }
         }
 
+        // Insert notes from re-imported CSV exports
+        if let Some(ref notes) = parse_result.notes {
+            if let Err(e) = state.db.update_flight_notes(flight_id, Some(notes.as_str())) {
+                log::warn!("Failed to insert notes for {}: {}", file_name, e);
+            }
+        }
+
+        // Insert app messages (tips and warnings) from DJI logs
+        if !parse_result.messages.is_empty() {
+            if let Err(e) = state.db.insert_flight_messages(flight_id, &parse_result.messages) {
+                log::warn!("Failed to insert messages for {}: {}", file_name, e);
+            }
+        }
+
         processed += 1;
         log::debug!("Synced: {}", file_name);
     }
@@ -1741,6 +1755,20 @@ async fn run_scheduled_sync(state: &WebAppState) -> Result<(usize, usize, usize)
         for manual_tag in &parse_result.manual_tags {
             if let Err(e) = state.db.add_flight_tag(flight_id, manual_tag) {
                 log::warn!("Scheduled sync: Failed to insert manual tag '{}' for {}: {}", manual_tag, file_name, e);
+            }
+        }
+
+        // Insert notes from re-imported CSV exports
+        if let Some(ref notes) = parse_result.notes {
+            if let Err(e) = state.db.update_flight_notes(flight_id, Some(notes.as_str())) {
+                log::warn!("Scheduled sync: Failed to insert notes for {}: {}", file_name, e);
+            }
+        }
+
+        // Insert app messages (tips and warnings) from DJI logs
+        if !parse_result.messages.is_empty() {
+            if let Err(e) = state.db.insert_flight_messages(flight_id, &parse_result.messages) {
+                log::warn!("Scheduled sync: Failed to insert messages for {}: {}", file_name, e);
             }
         }
         
