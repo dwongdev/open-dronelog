@@ -383,11 +383,11 @@
       "behavior": "Names load from localStorage instantly on page load, then sync from server. Rename operations update state immediately, cache to localStorage, then persist to server."
     },
     "flight_messages": {
-      "description": "Display flight tips and warnings from DJI logs in the flight stats view.",
+      "description": "Display flight tips and warnings from DJI logs via a dedicated modal and replay overlay.",
       "database": "database.rs: New flight_messages table (flight_id, timestamp_ms, message, message_type). CRUD methods for insert/query/delete messages.",
       "parser": "parser.rs: extract_messages() pulls AppTip and AppWarn messages from parsed frames. Messages included in ParseResult.",
-      "server": "server.rs: Messages returned with flight data response.",
-      "frontend": "FlightStats.tsx: Collapsible 'Flight Messages' section shows tips and warnings with timestamps, color-coded by type.",
+      "server": "server.rs: Messages returned with flight data response via FlightDataResponse.",
+      "frontend": "FlightMessagesModal.tsx: Dedicated modal showing all messages in a scrollable list with timestamp, color-coded type (tip=blue, warn=amber), and message text. Dashboard.tsx: Chat-bubble icon button with red count badge in the map panel header, rendered only when messages exist. FlightMap.tsx: activeMessage toast overlay at bottom-center of map during replay, showing the current message when replay position crosses a message timestamp.",
       "csv_export": "CSV export includes messages column as JSON for re-import preservation."
     },
     "map_hover_battery_status": {
@@ -415,6 +415,30 @@
       "frontend": "TelemetryCharts.tsx: Cell Voltages chart with dynamic legend (Cell 1, Cell 2, etc.). Shows individual cell voltage trends over time. Chart only rendered when cell voltage data exists.",
       "export": "exportUtils.ts: CSV export includes cell_voltages column as JSON array. CSV import via dronelogbook_parser.rs parses JSON arrays with backward compatibility (missing column = None). Uses parse_csv_line() for quoted field handling.",
       "backup": "Automatic via COPY telemetry. Cell voltages included in backup/restore cycle."
+    },
+    "locale_i18n": {
+      "description": "Full internationalization (i18n) support with language and locale selection.",
+      "translations": "src/i18n/: i18next-based translation system. Locales in src/i18n/locales/ for de, en, es, fr, it, ja, ko, nl, pl, pt, zh. All UI strings use translation keys.",
+      "locale": "Number and date formatting adapts to the selected locale (e.g., decimal separators, date order). Language dropdown in Settings shows all available languages.",
+      "store": "flightStore.ts: language preference persisted to localStorage. Applied on app load."
+    },
+    "component_serials": {
+      "description": "Full-length aircraft and battery serial numbers extracted from ComponentSerial records in DJI logs.",
+      "parser": "parser.rs: Reads ComponentSerial records (up to 50 chars) from DJI log frames, used preferentially over shorter OSD serial fields. Enables full 20-character Enterprise drone serials.",
+      "behavior": "Aircraft serial (droneSerial) and battery serial (batterySerial) now reflect the longer ComponentSerial value when available."
+    },
+    "telemetry_type_migration": {
+      "description": "Fixed data type migration for telemetry table columns to prevent dropping telemetry data when schema evolves.",
+      "database": "database.rs: Type migration logic ensures existing telemetry data is preserved when column types change, replacing a previous drop-and-recreate approach that was losing data."
+    },
+    "time_format_selection": {
+      "description": "User-selectable 12-hour or 24-hour time display format across the entire UI.",
+      "store": "flightStore.ts: timeFormat state ('12h' | '24h'), persisted to localStorage. formatTime() utility updated to respect the preference.",
+      "ui": "SettingsModal.tsx: Time Format dropdown (12-hour / 24-hour) in Preferences column. Affects all timestamp displays: FlightList.tsx, FlightStats.tsx, Overview.tsx, ManualEntryModal.tsx, FlightMessagesModal.tsx, and HTML report."
+    },
+    "woodpecker_ci": {
+      "description": "Woodpecker CI pipeline for building and pushing Docker images to Codeberg registry.",
+      "ci": ".woodpecker/docker.yml: Uses codeberg.org/woodpecker-plugins/docker-buildx:6.0.3. Triggers on tag/release/manual events (not every push). Builds linux/amd64 only (privileged mode not available on Codeberg CI). auto_tag:true generates versioned tags (e.g. 2.22.0, 2.22, 2) plus latest. Requires codeberg_token, docker_username, docker_password secrets. Docker Hub login block added to avoid rate limits during base image pulls."
     }
   },
   "behavior": {
@@ -534,6 +558,18 @@
         "key",
         "value",
         "updated_at"
+      ],
+      "flight_messages": [
+        "flight_id",
+        "timestamp_ms",
+        "message",
+        "message_type"
+      ],
+      "equipment_names": [
+        "serial",
+        "equipment_type",
+        "display_name",
+        "updated_at"
       ]
     },
     "notes": [
@@ -569,7 +605,13 @@
       "POST   /api/regenerate_smart_tags - Regenerate auto tags for all flights",
       "POST   /api/flights/deduplicate    - Remove duplicate flights from database (one-time cleanup)",
       "GET    /api/backup             - Download compressed database backup (tar.gz of Parquet files)",
-      "POST   /api/backup/restore     - Upload and restore a backup file (multipart)"
+      "POST   /api/backup/restore     - Upload and restore a backup file (multipart)",
+      "GET    /api/sync/config         - Get sync folder configuration (returns syncPath, syncInterval)",
+      "GET    /api/sync/files          - List files in sync folder not yet imported",
+      "POST   /api/sync/file           - Import a single file from sync folder (JSON: filename)",
+      "POST   /api/sync                - Import all pending files from sync folder",
+      "GET    /api/equipment_names     - Get all custom drone and battery display names",
+      "POST   /api/equipment_names     - Set custom display name (JSON: serial, equipment_type, display_name)"
     ]
   },
   "parser": {
@@ -631,6 +673,15 @@
       "registry": "ghcr.io",
       "image": "ghcr.io/arpanghosh8453/dji-logbook",
       "tags": "semver (e.g. 1.2.3, 1.2) + latest (auto) on release; custom tag on manual dispatch"
+    },
+    "woodpecker_yml": {
+      "trigger": "on tag/release/manual event (not every push)",
+      "registry": "codeberg.org",
+      "image": "codeberg.org/{CI_REPO_OWNER}/open-dronelog",
+      "tags": "auto_tag: true generates versioned tags (e.g. 2.22.0, 2.22, 2) + latest on tag event",
+      "plugin": "codeberg.org/woodpecker-plugins/docker-buildx:6.0.3",
+      "platforms": "linux/amd64 (privileged mode not allowed on Codeberg CI)",
+      "secrets": "codeberg_token (push), docker_username + docker_password (Docker Hub pull login to avoid rate limits)"
     }
   },
   "ui": {
@@ -639,7 +690,7 @@
     "keyboard_navigation": "FlightList: Up/Down arrows browse flights (preview highlight), Enter selects and loads. All modals close on Escape. Select/sort/export/tag dropdowns support arrow key navigation with highlighted index.",
     "flight_list": "Simple compact list with always-visible rename (pencil icon, sky-400) and delete (trash icon, red-400) icons. Subtitle shows date . duration . distance.",
     "charts": "ECharts with synced zoom; global drag-to-zoom toggle + reset zoom buttons; tooltip header uses pill capsules. Theme-aware base config. Hidden per-chart toolbox enables selection highlight for drag-to-zoom. Per-chart multi-select dropdown (max 4 fields, searchable with checkboxes) lets users choose which telemetry fields to display; settings persisted to localStorage.",
-    "map": "MapLibre terrain with deck.gl overlay. Spline-smoothed color-by gradient path, shadow layer, start/end/home markers, hover tooltip. Replay telemetry overlay with live-interpolated data during playback. RC stick input overlay with progressive-fill bars and theme-aware styling (cyan on dark, dark slate on light).",
+    "map": "MapLibre terrain with deck.gl overlay. Spline-smoothed color-by gradient path, shadow layer, start/end/home markers, hover tooltip. Replay telemetry overlay with live-interpolated data during playback. RC stick input overlay with progressive-fill bars and theme-aware styling (cyan on dark, dark slate on light). Flight messages badge (chat-bubble icon with red count) in map panel header; opens FlightMessagesModal. Active message toast overlay at bottom-center of map during replay.",
     "loading": "Spinner uses border-sky-400 for both-mode visibility."
   },
   "known_issues": [

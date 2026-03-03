@@ -99,6 +99,7 @@
 - **Exports**: CSV, JSON, GPX, KML, and Summary CSV export. FlyCard generator for shareable 1080x1080 social media images.
 - **HTML Report**: Generate a configurable, print-ready flight regulation report (A4 layout) with selectable field groups, weather data, and day-by-day grouping. Can be printed as PDF via Ctrl+P. Pilot name and field preferences can be customized and will persist across sessions.
 - **Manual Flight Entry**: Record flights without log files with optional coordinates and metadata.
+- **Multi-Language Support**: Full internationalization with 11 language locales (English, German, Spanish, French, Italian, Japanese, Korean, Dutch, Polish, Portuguese, Chinese) and locale-aware number and date formatting.
 - **Backup & Restore**: Export/import full database across desktop and Docker instances.
 
 ## Accessing flight log files

@@ -543,6 +543,27 @@ The 3D aircraft model follows the flight path at the correct altitude.
 - Left stick: Throttle and Rudder
 - Right stick: Elevator and Aileron
 
+**Flight Messages Overlay** shows in-flight tips and warnings during replay:
+
+- When replay playback reaches a message timestamp, a toast notification appears at the bottom of the map
+- Messages are color-coded by type: blue for tips, amber for warnings
+- The overlay clears automatically after the message timestamp passes
+
+### Flight Messages
+
+When a flight contains in-flight tips or warnings recorded in the DJI log:
+
+- A **chat-bubble icon** with a red count badge appears in the map panel header
+- Click it to open the **Flight Messages Modal**, which shows a full list of messages with:
+  - Timestamp (time into the flight)
+  - Message type (Tip or Warning)
+  - Message text
+- Messages are color-coded: blue for tips, amber/orange for warnings
+- The modal is scrollable if there are many messages
+
+> [!NOTE]
+> Flight messages are only available for DJI logs that contain app tip/warn records. Not all flights will have messages.
+
 ---
 
 ## Overview Dashboard
@@ -769,6 +790,19 @@ Access settings via the **gear icon** in the header.
 #### Hide Serial Numbers
 
 Toggle to mask aircraft and battery serial numbers in the interface. Useful for screenshots and screen sharing.
+
+#### Time Format
+
+| Option | Description |
+|--------|-------------|
+| **12-hour** | Timestamps displayed in 12-hour format (e.g., 2:30 PM) |
+| **24-hour** | Timestamps displayed in 24-hour format (e.g., 14:30) |
+
+Applies to all time displays throughout the app including the flight list, stats panel, messages modal, and HTML reports.
+
+#### Language
+
+Select the display language for the interface. Available locales include English, German, Spanish, French, Italian, Japanese, Korean, Dutch, Polish, Portuguese, and Chinese. Number and date formatting adapts to the selected locale.
 
 ### Smart Tags
 

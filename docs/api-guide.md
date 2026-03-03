@@ -304,6 +304,31 @@ interface OverviewStats {
 }
 ```
 
+### FlightMessage
+
+```typescript
+interface FlightMessage {
+  timestampMs: number;       // Milliseconds from flight start
+  messageType: 'tip' | 'warn';
+  message: string;
+}
+```
+
+### FlightDataResponse
+
+Returned by `GET /api/flight_data` and the `get_flight_data` Tauri command.
+
+```typescript
+interface FlightDataResponse {
+  flight: Flight;
+  telemetry: TelemetryData;        // Arrays of values per telemetry field, same length
+  track: [number, number, number][]; // [longitude, latitude, altitude] tuples
+  messages?: FlightMessage[];
+}
+```
+
+`TelemetryData` contains parallel arrays (one value per telemetry frame) for fields such as `time`, `latitude`, `longitude`, `height`, `speed`, `battery`, `batteryVoltage`, `batteryTemp`, `cellVoltages`, `pitch`, `roll`, `yaw`, `rcSignal`, `satellites`, `distanceToHome`, and others. All arrays share the same length as `time`.
+
 ---
 
 ## Error Handling
