@@ -4,7 +4,7 @@ variables:
 
 when:
   branch: ${CI_REPO_DEFAULT_BRANCH}
-  event: [tag, release, manual]
+  event: [push, tag, release, manual]
 
 steps:
   publish:
