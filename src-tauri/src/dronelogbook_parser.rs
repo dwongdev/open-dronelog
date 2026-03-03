@@ -397,6 +397,7 @@ impl<'a> DroneLogbookParser<'a> {
         let meta_home_lon = metadata_map.get("home_lon").and_then(|s| s.parse::<f64>().ok());
         let meta_duration_secs = metadata_map.get("duration_secs").and_then(|s| s.parse::<f64>().ok());
         let meta_notes = metadata_map.get("notes").cloned().filter(|s| !s.is_empty());
+        let meta_color = metadata_map.get("color").cloned().filter(|s| !s.is_empty());
 
         log::info!("Parsed metadata from CSV metadata column: display_name={:?}, drone_serial={:?}, battery_serial={:?}, start_time={:?}",
             meta_display_name, meta_drone_serial, meta_battery_serial, meta_start_time);
@@ -665,7 +666,7 @@ impl<'a> DroneLogbookParser<'a> {
         log::info!("Final auto tags: {:?}, manual tags: {:?}, notes: {:?}, messages: {}", 
             tags, imported_manual_tags, meta_notes.is_some(), imported_messages.len());
 
-        Ok(ParseResult { metadata, points, tags, manual_tags: imported_manual_tags, notes: meta_notes, messages: imported_messages })
+        Ok(ParseResult { metadata, points, tags, manual_tags: imported_manual_tags, notes: meta_notes, color: meta_color, messages: imported_messages })
     }
 }
 

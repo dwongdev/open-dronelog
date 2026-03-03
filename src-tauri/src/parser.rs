@@ -107,6 +107,8 @@ pub struct ParseResult {
     pub manual_tags: Vec<String>,
     /// Notes to preserve from re-imported CSV exports
     pub notes: Option<String>,
+    /// Color label to preserve from re-imported CSV exports
+    pub color: Option<String>,
     /// App messages (tips and warnings) from the flight log
     pub messages: Vec<FlightMessage>,
 }
@@ -350,7 +352,7 @@ impl<'a> LogParser<'a> {
         
         log::info!("Generated smart tags: {:?}", tags);
 
-        Ok(ParseResult { metadata, points, tags, manual_tags: Vec::new(), notes: None, messages })
+        Ok(ParseResult { metadata, points, tags, manual_tags: Vec::new(), notes: None, color: None, messages })
     }
 
     /// Generate smart tags based on flight metadata and statistics

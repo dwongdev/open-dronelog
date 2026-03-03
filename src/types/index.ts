@@ -31,6 +31,7 @@ export interface Flight {
   videoCount: number | null;
   tags?: FlightTag[];
   notes?: string | null;
+  color?: string | null;
 }
 
 /** Telemetry data formatted for ECharts */

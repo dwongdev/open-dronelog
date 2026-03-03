@@ -245,6 +245,20 @@ export async function updateFlightNotes(
   return invoke('update_flight_notes', { flightId, notes }) as Promise<boolean>;
 }
 
+export async function updateFlightColor(
+  flightId: number,
+  color: string,
+): Promise<boolean> {
+  if (isWeb) {
+    return fetchJson<boolean>('/flights/color', {
+      method: 'PUT',
+      body: JSON.stringify({ flight_id: flightId, color }),
+    });
+  }
+  const invoke = await getTauriInvoke();
+  return invoke('update_flight_color', { flightId, color }) as Promise<boolean>;
+}
+
 export async function hasApiKey(): Promise<boolean> {
   if (isWeb) {
     return fetchJson<boolean>('/has_api_key');

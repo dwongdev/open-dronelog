@@ -97,6 +97,7 @@ export function buildCsv(data: FlightDataResponse): string {
     home_lat: flight.homeLat ?? null,
     home_lon: flight.homeLon ?? null,
     notes: flight.notes ?? null,
+    color: flight.color ?? '#7dd3fc',
     tags: flight.tags?.map((t) => ({ tag: t.tag, tag_type: t.tagType })) ?? null,
   };
   // Remove null values for cleaner JSON

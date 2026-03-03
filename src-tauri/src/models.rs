@@ -55,6 +55,12 @@ pub struct Flight {
     #[serde(default)]
     pub tags: Vec<FlightTag>,
     pub notes: Option<String>,
+    #[serde(default = "default_flight_color")]
+    pub color: Option<String>,
+}
+
+fn default_flight_color() -> Option<String> {
+    Some("#7dd3fc".to_string())
 }
 
 /// A tag attached to a flight, with a type indicator

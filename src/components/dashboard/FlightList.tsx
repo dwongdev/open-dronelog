@@ -22,6 +22,7 @@ import { useTranslation } from 'react-i18next';
 import { addToBlacklist } from './FlightImporter';
 import { FlyCardGenerator } from './FlyCardGenerator';
 import { HtmlReportModal } from './HtmlReportModal';
+import ColorPickerModal from './ColorPickerModal';
 import { buildHtmlReport, type HtmlReportFieldConfig, type FlightReportData } from '@/lib/htmlReportBuilder';
 import { fetchFlightWeather } from '@/lib/weather';
 import 'react-day-picker/dist/style.css';
@@ -128,6 +129,7 @@ export function FlightList({
     deleteFlight,
     updateFlightName,
     updateFlightNotes,
+    updateFlightColor,
     unitSystem,
     locale,
     dateLocale,
@@ -235,6 +237,15 @@ export function FlightList({
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; flightId: number } | null>(null);
   const [contextExportSubmenuOpen, setContextExportSubmenuOpen] = useState(false);
   const [isRegeneratingTags, setIsRegeneratingTags] = useState(false);
+  // Color picker state
+  const [colorPickerFlightId, setColorPickerFlightId] = useState<number | null>(null);
+  const [colorPickerPosition, setColorPickerPosition] = useState<{ x: number; y: number } | undefined>();
+  // Color filter state
+  const [selectedColors, setSelectedColors] = useState<string[]>([]);
+  const [isColorDropdownOpen, setIsColorDropdownOpen] = useState(false);
+  const [colorHighlightedIndex, setColorHighlightedIndex] = useState(0);
+  const colorBtnRef = useRef<HTMLButtonElement | null>(null);
+  const colorDropdownRef = useRef<HTMLDivElement | null>(null);
   // FlyCard generator state
   const [flyCardFlightId, setFlyCardFlightId] = useState<number | null>(null);
   const [flyCardPending, setFlyCardPending] = useState<number | null>(null); // Flight ID waiting for map load
@@ -390,7 +401,7 @@ export function FlightList({
   // --- Cross-filter helper: apply all filters EXCEPT the excluded dimension ---
   // This lets each filter's available options reflect the other active filters.
   const crossFiltered = useMemo(() => {
-    type Dimension = 'drone' | 'battery' | 'duration' | 'altitude' | 'distance' | 'date' | 'tags';
+    type Dimension = 'drone' | 'battery' | 'duration' | 'altitude' | 'distance' | 'date' | 'tags' | 'color';
 
     const applyFilters = (exclude: Dimension) => {
       const start = dateRange?.from ?? null;
@@ -438,6 +449,11 @@ export function FlightList({
           const flightTagNames = (flight.tags ?? []).map(t => typeof t === 'string' ? t : t.tag);
           if (!selectedTags.every((tag) => flightTagNames.includes(tag))) return false;
         }
+        // Color filter
+        if (exclude !== 'color' && selectedColors.length > 0) {
+          const flightColor = (flight.color ?? '#7dd3fc').toLowerCase();
+          if (!selectedColors.includes(flightColor)) return false;
+        }
         // Map area filter (always applied, never excluded)
         if (mapAreaFilterEnabled && mapVisibleBounds) {
           if (flight.homeLat == null || flight.homeLon == null) return false;
@@ -456,8 +472,9 @@ export function FlightList({
       forDistance: applyFilters('distance'),
       forDate: applyFilters('date'),
       forTags: applyFilters('tags'),
+      forColor: applyFilters('color'),
     };
-  }, [flights, dateRange, selectedDrones, selectedBatteries, durationFilterMin, durationFilterMax, altitudeFilterMin, altitudeFilterMax, distanceFilterMin, distanceFilterMax, selectedTags, mapAreaFilterEnabled, mapVisibleBounds]);
+  }, [flights, dateRange, selectedDrones, selectedBatteries, durationFilterMin, durationFilterMax, altitudeFilterMin, altitudeFilterMax, distanceFilterMin, distanceFilterMax, selectedTags, selectedColors, mapAreaFilterEnabled, mapVisibleBounds]);
 
   const droneOptions = useMemo(() => {
     const entries = crossFiltered.forDrone
@@ -521,6 +538,24 @@ export function FlightList({
     });
     return tags;
   }, [crossFiltered.forTags]);
+
+  // All unique colors across all flights (for the color filter dropdown)
+  const allFlightColors = useMemo(() => {
+    const colorSet = new Set<string>();
+    flights.forEach((f) => {
+      colorSet.add((f.color ?? '#7dd3fc').toLowerCase());
+    });
+    return Array.from(colorSet).sort();
+  }, [flights]);
+
+  // Colors that are available given current cross-filter state
+  const availableColors = useMemo(() => {
+    const colors = new Set<string>();
+    crossFiltered.forColor.forEach((f) => {
+      colors.add((f.color ?? '#7dd3fc').toLowerCase());
+    });
+    return colors;
+  }, [crossFiltered.forColor]);
 
   // Helper: filtered & sorted drone list for multi-select dropdown
   // Order: selected first, then available, then unavailable (greyed out) at bottom
@@ -669,7 +704,7 @@ export function FlightList({
     if (end) end.setHours(23, 59, 59, 999);
     const normalizedSearch = searchQuery.trim().toLowerCase();
 
-    const hasAnyFilter = !!(start || end || selectedDrones.length > 0 || selectedBatteries.length > 0 || durationFilterMin !== null || durationFilterMax !== null || altitudeFilterMin !== null || altitudeFilterMax !== null || distanceFilterMin !== null || distanceFilterMax !== null || selectedTags.length > 0 || (mapAreaFilterEnabled && mapVisibleBounds) || normalizedSearch);
+    const hasAnyFilter = !!(start || end || selectedDrones.length > 0 || selectedBatteries.length > 0 || durationFilterMin !== null || durationFilterMax !== null || altitudeFilterMin !== null || altitudeFilterMax !== null || distanceFilterMin !== null || distanceFilterMax !== null || selectedTags.length > 0 || selectedColors.length > 0 || (mapAreaFilterEnabled && mapVisibleBounds) || normalizedSearch);
 
     return flights.filter((flight) => {
       // When no filters are active, show all
@@ -735,6 +770,13 @@ export function FlightList({
         if (isFilterInverted ? matchesTags : !matchesTags) return false;
       }
 
+      // Color filter
+      if (selectedColors.length > 0) {
+        const flightColor = (flight.color ?? '#7dd3fc').toLowerCase();
+        const matchesColor = selectedColors.includes(flightColor);
+        if (isFilterInverted ? matchesColor : !matchesColor) return false;
+      }
+
       // Map area filter (not affected by inversion - always AND)
       if (mapAreaFilterEnabled && mapVisibleBounds) {
         if (flight.homeLat == null || flight.homeLon == null) return false;
@@ -752,7 +794,7 @@ export function FlightList({
 
       return true;
     });
-  }, [dateRange, flights, selectedBatteries, selectedDrones, durationFilterMin, durationFilterMax, altitudeFilterMin, altitudeFilterMax, distanceFilterMin, distanceFilterMax, selectedTags, isFilterInverted, mapAreaFilterEnabled, mapVisibleBounds, searchQuery]);
+  }, [dateRange, flights, selectedBatteries, selectedDrones, durationFilterMin, durationFilterMax, altitudeFilterMin, altitudeFilterMax, distanceFilterMin, distanceFilterMax, selectedTags, selectedColors, isFilterInverted, mapAreaFilterEnabled, mapVisibleBounds, searchQuery]);
 
   // Sync filtered flight IDs to the store so Overview can use them
   // Use useLayoutEffect to ensure sync happens synchronously before browser paint
@@ -835,7 +877,7 @@ export function FlightList({
       }
 
       // Don't handle if a modal/dropdown is open
-      if (isDateOpen || isSortOpen || isTagDropdownOpen || isExportDropdownOpen || editingId !== null) {
+      if (isDateOpen || isSortOpen || isTagDropdownOpen || isColorDropdownOpen || isExportDropdownOpen || editingId !== null) {
         return;
       }
 
@@ -902,7 +944,7 @@ export function FlightList({
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [sortedFlights, selectedFlightId, previewFlightId, overviewHighlightedFlightId, activeView, selectFlight, onSelectFlight, onHighlightFlight, setOverviewHighlightedFlightId, isDateOpen, isSortOpen, isTagDropdownOpen, isExportDropdownOpen, editingId]);
+  }, [sortedFlights, selectedFlightId, previewFlightId, overviewHighlightedFlightId, activeView, selectFlight, onSelectFlight, onHighlightFlight, setOverviewHighlightedFlightId, isDateOpen, isSortOpen, isTagDropdownOpen, isColorDropdownOpen, isExportDropdownOpen, editingId]);
 
   const sortOptions = useMemo(
     () => [
@@ -1547,12 +1589,12 @@ export function FlightList({
           className="w-full flex items-center justify-between px-3 py-2 text-xs text-gray-400 hover:text-white transition-colors"
         >
           <span className="flex items-center gap-1.5">
-            <span className={`font-medium ${(dateRange?.from || dateRange?.to || selectedDrones.length > 0 || selectedBatteries.length > 0 || durationFilterMin !== null || durationFilterMax !== null || altitudeFilterMin !== null || altitudeFilterMax !== null || distanceFilterMin !== null || distanceFilterMax !== null || selectedTags.length > 0 || mapAreaFilterEnabled || searchQuery.trim()) ? (isFilterInverted ? 'text-red-400' : 'text-emerald-400') : ''}`}>
-              {dateRange?.from || dateRange?.to || selectedDrones.length > 0 || selectedBatteries.length > 0 || durationFilterMin !== null || durationFilterMax !== null || altitudeFilterMin !== null || altitudeFilterMax !== null || distanceFilterMin !== null || distanceFilterMax !== null || selectedTags.length > 0 || mapAreaFilterEnabled || searchQuery.trim()
+            <span className={`font-medium ${(dateRange?.from || dateRange?.to || selectedDrones.length > 0 || selectedBatteries.length > 0 || durationFilterMin !== null || durationFilterMax !== null || altitudeFilterMin !== null || altitudeFilterMax !== null || distanceFilterMin !== null || distanceFilterMax !== null || selectedTags.length > 0 || selectedColors.length > 0 || mapAreaFilterEnabled || searchQuery.trim()) ? (isFilterInverted ? 'text-red-400' : 'text-emerald-400') : ''}`}>
+              {dateRange?.from || dateRange?.to || selectedDrones.length > 0 || selectedBatteries.length > 0 || durationFilterMin !== null || durationFilterMax !== null || altitudeFilterMin !== null || altitudeFilterMax !== null || distanceFilterMin !== null || distanceFilterMax !== null || selectedTags.length > 0 || selectedColors.length > 0 || mapAreaFilterEnabled || searchQuery.trim()
                 ? isFilterInverted ? t('flightList.filtersActiveInverted') : t('flightList.filtersActive')
                 : isFiltersCollapsed ? t('flightList.filtersExpand') : t('flightList.filters')}
             </span>
-            {(dateRange?.from || dateRange?.to || selectedDrones.length > 0 || selectedBatteries.length > 0 || durationFilterMin !== null || durationFilterMax !== null || altitudeFilterMin !== null || altitudeFilterMax !== null || distanceFilterMin !== null || distanceFilterMax !== null || selectedTags.length > 0 || mapAreaFilterEnabled || searchQuery.trim()) && (
+            {(dateRange?.from || dateRange?.to || selectedDrones.length > 0 || selectedBatteries.length > 0 || durationFilterMin !== null || durationFilterMax !== null || altitudeFilterMin !== null || altitudeFilterMax !== null || distanceFilterMin !== null || distanceFilterMax !== null || selectedTags.length > 0 || selectedColors.length > 0 || mapAreaFilterEnabled || searchQuery.trim()) && (
               <button
                 type="button"
                 onClick={(e) => {
@@ -1610,7 +1652,7 @@ export function FlightList({
 
             {/* Scrollable filter fields container */}
             {(() => {
-              const hasScrollboxFilter = durationFilterMin !== null || durationFilterMax !== null || altitudeFilterMin !== null || altitudeFilterMax !== null || distanceFilterMin !== null || distanceFilterMax !== null || dateRange?.from || dateRange?.to || selectedDrones.length > 0 || selectedBatteries.length > 0 || selectedTags.length > 0;
+              const hasScrollboxFilter = durationFilterMin !== null || durationFilterMax !== null || altitudeFilterMin !== null || altitudeFilterMax !== null || distanceFilterMin !== null || distanceFilterMax !== null || dateRange?.from || dateRange?.to || selectedDrones.length > 0 || selectedBatteries.length > 0 || selectedTags.length > 0 || selectedColors.length > 0;
               return (
             <div className={`relative rounded-lg border-2 transition-all duration-200 ${hasScrollboxFilter ? 'border-emerald-400/70 shadow-[0_0_12px_rgba(52,211,153,0.35),0_0_4px_rgba(52,211,153,0.2)]' : 'border-sky-400/50 shadow-[0_0_10px_rgba(56,189,248,0.25),0_0_4px_rgba(56,189,248,0.15)]'}`}>
               <div className="max-h-[190px] overflow-y-auto overflow-x-hidden space-y-3 py-2.5 pl-2.5 pr-4 filter-scroll-area">
@@ -2189,6 +2231,108 @@ export function FlightList({
               </div>
             )}
 
+            {/* Color filter */}
+            {allFlightColors.length > 1 && (
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-gray-400 whitespace-nowrap w-[52px] flex-shrink-0">{t('flightList.color', 'Color')}</label>
+                <div className="relative flex-1 min-w-0">
+                  <button
+                    ref={colorBtnRef}
+                    type="button"
+                    onClick={() => setIsColorDropdownOpen((v) => !v)}
+                    className="input w-full text-xs h-8 px-3 py-1.5 flex items-center justify-between gap-2"
+                  >
+                    <span className={`truncate flex items-center gap-1 ${selectedColors.length > 0 ? 'text-gray-100' : 'text-gray-400'}`}>
+                      {selectedColors.length > 0 ? (
+                        <>
+                          {selectedColors.map((c) => (
+                            <span key={c} className="inline-block w-3 h-3 rounded-sm border border-gray-600 flex-shrink-0" style={{ backgroundColor: c }} />
+                          ))}
+                          <span className="ml-1">{selectedColors.length} {t('flightList.selected', 'selected')}</span>
+                        </>
+                      ) : t('flightList.allColors', 'All Colors')}
+                    </span>
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="flex-shrink-0"><polyline points="6 9 12 15 18 9" /></svg>
+                  </button>
+                  {isColorDropdownOpen && (
+                    <>
+                      <div
+                        className="fixed inset-0 z-40"
+                        onClick={() => setIsColorDropdownOpen(false)}
+                      />
+                      <div
+                        ref={colorDropdownRef}
+                        className="fixed z-50 max-h-56 rounded-lg border border-gray-700 bg-drone-surface shadow-xl flex flex-col overflow-hidden"
+                        style={(() => { const r = colorBtnRef.current?.getBoundingClientRect(); return r ? { top: r.bottom + 4, left: r.left, width: r.width } : {}; })()}
+                      >
+                        <div className="overflow-auto flex-1">
+                          {(() => {
+                            // Sort: selected first, then available, then unavailable
+                            const sorted = [...allFlightColors].sort((a, b) => {
+                              const aSelected = selectedColors.includes(a);
+                              const bSelected = selectedColors.includes(b);
+                              const aAvail = availableColors.has(a);
+                              const bAvail = availableColors.has(b);
+                              if (aSelected && !bSelected) return -1;
+                              if (!aSelected && bSelected) return 1;
+                              if (aAvail && !bAvail) return -1;
+                              if (!aAvail && bAvail) return 1;
+                              return a.localeCompare(b);
+                            });
+                            return sorted.map((color, index) => {
+                              const isSelected = selectedColors.includes(color);
+                              const isAvailable = availableColors.has(color);
+                              const isDisabled = !isSelected && !isAvailable;
+                              return (
+                                <button
+                                  key={color}
+                                  type="button"
+                                  onClick={() => {
+                                    if (isDisabled) return;
+                                    setSelectedColors((prev) =>
+                                      isSelected
+                                        ? prev.filter((c) => c !== color)
+                                        : [...prev, color]
+                                    );
+                                  }}
+                                  onMouseEnter={() => !isDisabled && setColorHighlightedIndex(index)}
+                                  className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 transition-colors ${isDisabled ? 'opacity-35 cursor-default' : isSelected
+                                    ? 'bg-sky-500/20 text-gray-800 dark:text-sky-200'
+                                    : 'text-gray-700 dark:text-gray-300 hover:bg-gray-200/50 dark:hover:bg-gray-700/50'
+                                    } ${!isDisabled && index === colorHighlightedIndex && !isSelected ? 'bg-gray-200/50 dark:bg-gray-700/50' : ''}`}
+                                >
+                                  <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center flex-shrink-0 ${isSelected ? 'border-sky-500 bg-sky-500' : 'border-gray-400 dark:border-gray-600'
+                                    }`}>
+                                    {isSelected && (
+                                      <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+                                    )}
+                                  </span>
+                                  <span className="w-4 h-4 rounded-sm border border-gray-600 flex-shrink-0" style={{ backgroundColor: color }} />
+                                  <span className="font-mono">{color.toUpperCase()}</span>
+                                </button>
+                              );
+                            });
+                          })()}
+                          {selectedColors.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedColors([]);
+                                setIsColorDropdownOpen(false);
+                              }}
+                              className="w-full text-left px-3 py-1.5 text-xs text-gray-400 hover:text-white border-t border-gray-700"
+                            >
+                              {t('flightList.clearColorFilter', 'Clear color filter')}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+
               </div>
             </div>
               );
@@ -2640,13 +2784,22 @@ export function FlightList({
                 onSelectFlight?.(flight.id);
               }
             }}
-            className={`w-full px-3 py-2 text-left cursor-pointer transition-colors duration-150 ${(activeView === 'overview'
+            className={`w-full text-left cursor-pointer transition-colors duration-150 flex ${(activeView === 'overview'
               ? overviewHighlightedFlightId === flight.id
               : (selectedFlightId === flight.id || previewFlightId === flight.id))
-              ? 'bg-drone-primary/20 border-l-2 border-drone-primary'
-              : 'border-l-2 border-transparent hover:bg-gray-700/30 hover:border-l-gray-500'
+              ? 'bg-drone-primary/20'
+              : 'hover:bg-gray-700/30'
               }`}
           >
+            {/* Color bar */}
+            <div
+              className={`w-1 flex-shrink-0 rounded-r-sm transition-colors ${(activeView === 'overview'
+                ? overviewHighlightedFlightId === flight.id
+                : (selectedFlightId === flight.id || previewFlightId === flight.id))
+                ? '' : ''}`}
+              style={{ backgroundColor: flight.color ?? '#7dd3fc' }}
+            />
+            <div className="flex-1 min-w-0 px-2.5 py-2">
             {/* Rename mode */}
             {editingId === flight.id ? (
               <div>
@@ -2768,6 +2921,7 @@ export function FlightList({
                 </button>
               </div>
             )}
+            </div>{/* end of flex-1 inner content */}
           </div>
         ))}
         {sortedFlights.length === 0 && (
@@ -2809,6 +2963,22 @@ export function FlightList({
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
             </svg>
             {flights.find(f => f.id === contextMenu.flightId)?.notes ? t('flightList.editNotes') : t('flightList.addNotes')}
+          </button>
+
+          {/* Edit Color */}
+          <button
+            type="button"
+            onClick={() => {
+              setColorPickerFlightId(contextMenu.flightId);
+              setColorPickerPosition({ x: contextMenu.x, y: contextMenu.y });
+              setContextMenu(null);
+            }}
+            className="w-full px-3 py-2 text-left text-sm text-gray-300 hover:bg-gray-700/50 flex items-center gap-2"
+          >
+            <svg className="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
+            </svg>
+            {t('flightList.editColor', 'Edit Color')}
           </button>
 
           {/* Delete */}
@@ -2922,6 +3092,22 @@ export function FlightList({
           </div>
         </div>
       )}
+
+      {/* Color Picker Modal */}
+      <ColorPickerModal
+        isOpen={colorPickerFlightId !== null}
+        currentColor={flights.find(f => f.id === colorPickerFlightId)?.color ?? '#7dd3fc'}
+        position={colorPickerPosition}
+        onSelect={(color) => {
+          if (colorPickerFlightId !== null) {
+            updateFlightColor(colorPickerFlightId, color);
+          }
+        }}
+        onClose={() => {
+          setColorPickerFlightId(null);
+          setColorPickerPosition(undefined);
+        }}
+      />
 
       {/* Regenerating Tags Overlay */}
       {isRegeneratingTags && (

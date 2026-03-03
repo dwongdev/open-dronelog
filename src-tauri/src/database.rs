@@ -200,7 +200,8 @@ impl Database {
                 photo_count     INTEGER,                 -- Number of photos taken
                 video_count     INTEGER,                 -- Number of video recordings
                 imported_at     TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-                notes           VARCHAR
+                notes           VARCHAR,
+                color           VARCHAR DEFAULT '#7dd3fc'  -- Flight color label (hex, default light blue)
             );
 
             -- Index for sorting by flight date
@@ -367,6 +368,7 @@ impl Database {
             ("battery_serial", "ALTER TABLE flights ADD COLUMN battery_serial VARCHAR"),
             ("photo_count", "ALTER TABLE flights ADD COLUMN photo_count INTEGER"),
             ("video_count", "ALTER TABLE flights ADD COLUMN video_count INTEGER"),
+            ("color", "ALTER TABLE flights ADD COLUMN color VARCHAR DEFAULT '#7dd3fc'"),
         ];
 
         let need_backfill = !columns.contains("photo_count");
@@ -917,7 +919,7 @@ impl Database {
                 CAST(start_time AS VARCHAR) AS start_time,
                 duration_secs, total_distance,
                 max_altitude, max_speed, home_lat, home_lon, point_count,
-                photo_count, video_count, notes
+                photo_count, video_count, notes, COALESCE(color, '#7dd3fc') AS color
             FROM flights
             ORDER BY start_time DESC
             "#,
@@ -946,6 +948,7 @@ impl Database {
                     video_count: row.get(17)?,
                     tags: Vec::new(),
                     notes: row.get(18)?,
+                    color: row.get(19)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -993,7 +996,7 @@ impl Database {
                 CAST(start_time AS VARCHAR) AS start_time,
                 duration_secs, total_distance,
                 max_altitude, max_speed, home_lat, home_lon, point_count,
-                photo_count, video_count, notes
+                photo_count, video_count, notes, COALESCE(color, '#7dd3fc') AS color
             FROM flights
             WHERE id = ?
             "#,
@@ -1020,6 +1023,7 @@ impl Database {
                     video_count: row.get(17)?,
                     tags: Vec::new(),
                     notes: row.get(18)?,
+                    color: row.get(19)?,
                 })
             },
         )
@@ -1597,6 +1601,19 @@ impl Database {
         )?;
 
         log::debug!("Updated flight {} notes", flight_id);
+        Ok(())
+    }
+
+    /// Update the color label for a flight
+    pub fn update_flight_color(&self, flight_id: i64, color: &str) -> Result<(), DatabaseError> {
+        let conn = self.conn.lock().unwrap();
+
+        conn.execute(
+            "UPDATE flights SET color = ? WHERE id = ?",
+            params![color, flight_id],
+        )?;
+
+        log::debug!("Updated flight {} color to '{}'", flight_id, color);
         Ok(())
     }
 

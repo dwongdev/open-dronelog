@@ -317,6 +317,13 @@ mod tauri_app {
             }
         }
 
+        // Apply color from re-imported CSV exports
+        if let Some(ref color) = parse_result.color {
+            if let Err(e) = state.db.update_flight_color(flight_id, color) {
+                log::warn!("Failed to set color for flight {}: {}", flight_id, e);
+            }
+        }
+
         // Insert app messages (tips and warnings) from DJI logs
         if !parse_result.messages.is_empty() {
             if let Err(e) = state.db.insert_flight_messages(flight_id, &parse_result.messages) {
@@ -620,6 +627,26 @@ mod tauri_app {
             .update_flight_notes(flight_id, notes_ref)
             .map(|_| true)
             .map_err(|e| format!("Failed to update flight notes: {}", e))
+    }
+
+    #[tauri::command]
+    pub async fn update_flight_color(
+        flight_id: i64,
+        color: String,
+        state: State<'_, AppState>,
+    ) -> Result<bool, String> {
+        let trimmed = color.trim();
+        if trimmed.is_empty() {
+            return Err("Color cannot be empty".to_string());
+        }
+
+        log::info!("Updating color for flight {} to '{}'", flight_id, trimmed);
+
+        state
+            .db
+            .update_flight_color(flight_id, trimmed)
+            .map(|_| true)
+            .map_err(|e| format!("Failed to update flight color: {}", e))
     }
 
     #[tauri::command]
@@ -1145,6 +1172,7 @@ mod tauri_app {
                 deduplicate_flights,
                 update_flight_name,
                 update_flight_notes,
+                update_flight_color,
                 has_api_key,
                 get_api_key_type,
                 set_api_key,

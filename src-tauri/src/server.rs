@@ -295,6 +295,13 @@ async fn import_log(
         }
     }
 
+    // Apply color from re-imported CSV exports
+    if let Some(ref color) = parse_result.color {
+        if let Err(e) = state.db.update_flight_color(flight_id, color) {
+            log::warn!("Failed to set color for flight {}: {}", flight_id, e);
+        }
+    }
+
     // Insert app messages (tips and warnings) from DJI logs
     if !parse_result.messages.is_empty() {
         if let Err(e) = state.db.insert_flight_messages(flight_id, &parse_result.messages) {
@@ -602,6 +609,31 @@ async fn update_flight_notes(
         .update_flight_notes(payload.flight_id, notes_ref)
         .map(|_| Json(true))
         .map_err(|e| err_response(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to update flight notes: {}", e)))
+}
+
+/// PUT /api/flights/color — Update flight color label
+#[derive(Deserialize)]
+struct UpdateColorPayload {
+    flight_id: i64,
+    color: String,
+}
+
+async fn update_flight_color(
+    AxumState(state): AxumState<WebAppState>,
+    Json(payload): Json<UpdateColorPayload>,
+) -> Result<Json<bool>, (StatusCode, Json<ErrorResponse>)> {
+    let trimmed = payload.color.trim();
+    if trimmed.is_empty() {
+        return Err(err_response(StatusCode::BAD_REQUEST, "Color cannot be empty"));
+    }
+
+    log::info!("Updating color for flight {} to '{}'", payload.flight_id, trimmed);
+
+    state
+        .db
+        .update_flight_color(payload.flight_id, trimmed)
+        .map(|_| Json(true))
+        .map_err(|e| err_response(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to update flight color: {}", e)))
 }
 
 /// GET /api/has_api_key — Check if DJI API key is configured
@@ -1280,6 +1312,13 @@ async fn sync_single_file(
         }
     }
 
+    // Apply color from re-imported CSV exports
+    if let Some(ref color) = parse_result.color {
+        if let Err(e) = state.db.update_flight_color(flight_id, color) {
+            log::warn!("Failed to set color: {}", e);
+        }
+    }
+
     // Insert app messages (tips and warnings) from DJI logs
     if !parse_result.messages.is_empty() {
         if let Err(e) = state.db.insert_flight_messages(flight_id, &parse_result.messages) {
@@ -1456,6 +1495,13 @@ async fn sync_from_folder(
             }
         }
 
+        // Apply color from re-imported CSV exports
+        if let Some(ref color) = parse_result.color {
+            if let Err(e) = state.db.update_flight_color(flight_id, color) {
+                log::warn!("Failed to set color for {}: {}", file_name, e);
+            }
+        }
+
         // Insert app messages (tips and warnings) from DJI logs
         if !parse_result.messages.is_empty() {
             if let Err(e) = state.db.insert_flight_messages(flight_id, &parse_result.messages) {
@@ -1548,6 +1594,7 @@ pub fn build_router(state: WebAppState) -> Router {
         .route("/api/flights/deduplicate", post(deduplicate_flights))
         .route("/api/flights/name", put(update_flight_name))
         .route("/api/flights/notes", put(update_flight_notes))
+        .route("/api/flights/color", put(update_flight_color))
         .route("/api/flights/tags/add", post(add_flight_tag))
         .route("/api/flights/tags/remove", post(remove_flight_tag))
         .route("/api/tags", get(get_all_tags))
@@ -1776,6 +1823,13 @@ async fn run_scheduled_sync(state: &WebAppState) -> Result<(usize, usize, usize)
         if let Some(ref notes) = parse_result.notes {
             if let Err(e) = state.db.update_flight_notes(flight_id, Some(notes.as_str())) {
                 log::warn!("Scheduled sync: Failed to insert notes for {}: {}", file_name, e);
+            }
+        }
+
+        // Apply color from re-imported CSV exports
+        if let Some(ref color) = parse_result.color {
+            if let Err(e) = state.db.update_flight_color(flight_id, color) {
+                log::warn!("Scheduled sync: Failed to set color for {}: {}", file_name, e);
             }
         }
 
