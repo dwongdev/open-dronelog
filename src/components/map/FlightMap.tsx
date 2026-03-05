@@ -6,7 +6,6 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import Map, { NavigationControl, Marker, Source, Layer, useControl } from 'react-map-gl/maplibre';
 import type { MapRef } from 'react-map-gl/maplibre';
-import type { StyleSpecification } from 'maplibre-gl';
 import { PathLayer, ScatterplotLayer, TextLayer, IconLayer } from '@deck.gl/layers';
 import { MapboxOverlay } from '@deck.gl/mapbox';
 import 'maplibre-gl/dist/maplibre-gl.css';
@@ -15,6 +14,7 @@ import { useFlightStore } from '@/stores/flightStore';
 import { Select } from '@/components/ui/Select';
 import type { TelemetryData, FlightMessage } from '@/types';
 import { useTranslation } from 'react-i18next';
+import { type MapType, MAP_TYPE_OPTIONS, getMapStyle } from '@/lib/mapStyles';
 
 interface FlightMapProps {
   track: [number, number, number][]; // [lng, lat, alt][]
@@ -27,36 +27,6 @@ interface FlightMapProps {
 }
 
 type ColorByMode = 'progress' | 'height' | 'speed' | 'distance' | 'videoSegment';
-
-const MAP_STYLES = {
-  dark: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
-  light: 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json',
-} as const;
-
-const SATELLITE_STYLE: StyleSpecification = {
-  version: 8,
-  sources: {
-    satellite: {
-      type: 'raster',
-      tiles: [
-        'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-      ],
-      tileSize: 256,
-      maxzoom: 18,
-      attribution: 'Tiles © Esri',
-    },
-  },
-  layers: [
-    {
-      id: 'satellite-base',
-      type: 'raster',
-      source: 'satellite',
-      paint: {
-        'raster-fade-duration': 150,
-      },
-    },
-  ],
-};
 
 const TERRAIN_SOURCE_ID = 'terrain-dem';
 const TERRAIN_SOURCE = {
@@ -330,7 +300,11 @@ export function FlightMap({ track, homeLat, homeLon, durationSecs, telemetry, th
     bearing: 0,
   });
   const [is3D, setIs3D] = useState(() => getSessionBool('map:is3d', true));
-  const [isSatellite, setIsSatellite] = useState(() => getSessionBool('map:isSatellite', true));
+  const [mapType, setMapType] = useState<MapType>(() => {
+    if (typeof window === 'undefined') return 'satellite'; // Change default to satellite for flight path map
+    const stored = window.sessionStorage.getItem('map:mapType');
+    return (stored as MapType) || 'satellite';
+  });
   const [colorBy, setColorBy] = useState<ColorByMode>(() => {
     if (typeof window === 'undefined') return 'progress';
     return (window.sessionStorage.getItem('map:colorBy') as ColorByMode) || 'progress';
@@ -442,9 +416,34 @@ export function FlightMap({ track, homeLat, homeLon, durationSecs, telemetry, th
   }, [themeMode]);
 
   const activeMapStyle = useMemo(
-    () => (isSatellite ? SATELLITE_STYLE : MAP_STYLES[resolvedTheme]),
-    [isSatellite, resolvedTheme]
+    () => getMapStyle(mapType, resolvedTheme),
+    [mapType, resolvedTheme]
   );
+
+  // Save map settings to session storage whenever they change
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.sessionStorage.setItem('map:mapType', mapType);
+      window.sessionStorage.setItem('map:is3d', String(is3D));
+      window.sessionStorage.setItem('map:colorBy', colorBy);
+      window.sessionStorage.setItem('map:showTooltip', String(showTooltip));
+      window.sessionStorage.setItem('map:showAircraft', String(showAircraft));
+      window.sessionStorage.setItem('map:showMedia', String(showMedia));
+      window.sessionStorage.setItem('map:showMessages', String(showMessages));
+      window.sessionStorage.setItem('map:lineThickness', String(lineThickness));
+      window.sessionStorage.setItem('map:settingsCollapsed', String(mapSettingsCollapsed));
+    }
+  }, [
+    mapType,
+    is3D,
+    colorBy,
+    showTooltip,
+    showAircraft,
+    showMedia,
+    showMessages,
+    lineThickness,
+    mapSettingsCollapsed,
+  ]);
 
   // ─── Flight replay animation loop ──────────────────────────────────
   const effectiveDuration = useMemo(
@@ -952,12 +951,12 @@ export function FlightMap({ track, homeLat, homeLon, durationSecs, telemetry, th
 
     // Desktop: shadow + gradient path
     return [
-      // Shadow / outline layer
+      // Shadow layer slightly thicker than path, purely for visual drop-shadow effect
       new PathLayer({
         id: 'flight-path-shadow',
         data: deckPathData,
         getPath: (d) => d.path,
-        getColor: [0, 0, 0, 40],
+        getColor: [0, 0, 0, mapType === 'satellite' ? 40 : 0],
         getWidth: shadowWidth,
         widthUnits: 'pixels',
         widthMinPixels: shadowWidth - 1,
@@ -982,10 +981,10 @@ export function FlightMap({ track, homeLat, homeLon, durationSecs, telemetry, th
         billboard: true,
         opacity: 1,
         pickable: showTooltip,
-        parameters: { depthTest: false },
+        parameters: { depthTest: is3D }, // Disable depth-test in 2D so layers aren't clipped by invisible terrain
       }),
     ];
-  }, [deckPathData, showTooltip, lineThickness]);
+  }, [deckPathData, showTooltip, lineThickness, is3D, mapType]);
 
   // ─── Media markers (photo/video locations) with clustering ────────
   interface MediaPoint {
@@ -1350,11 +1349,8 @@ export function FlightMap({ track, homeLat, homeLon, durationSecs, telemetry, th
     }
   }, [is3D]);
 
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      window.sessionStorage.setItem('map:isSatellite', String(isSatellite));
-    }
-  }, [isSatellite]);
+  // isSatellite has been replaced by the centralized mapType effect above
+
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -1481,16 +1477,11 @@ export function FlightMap({ track, homeLat, homeLon, durationSecs, telemetry, th
             className={`transition-all duration-200 ease-in-out ${mapSettingsCollapsed ? 'max-h-0 overflow-hidden opacity-0' : 'max-h-[500px] overflow-visible opacity-100'
               }`}
           >
-            <div className="px-3 pb-2 space-y-2">
+            <div className="px-3 pb-3 space-y-2">
               <ToggleRow
                 label={t('map.terrain3d')}
                 checked={is3D}
                 onChange={setIs3D}
-              />
-              <ToggleRow
-                label={t('map.satellite')}
-                checked={isSatellite}
-                onChange={setIsSatellite}
               />
               <ToggleRow
                 label={t('map.telemetry')}
@@ -1513,32 +1504,50 @@ export function FlightMap({ track, homeLat, homeLon, durationSecs, telemetry, th
                 onChange={setShowMessages}
               />
 
+              <div className="pt-2 border-t border-gray-600/50 flex items-center justify-between gap-3">
+                <label className="text-xs text-gray-300">Mode</label>
+                <div className="w-[110px]">
+                  <Select
+                    value={mapType}
+                    onChange={(val) => setMapType(val as MapType)}
+                    options={MAP_TYPE_OPTIONS.map((opt) => ({
+                      value: opt.value,
+                      label: t(opt.labelKey as any),
+                    }))}
+                  />
+                </div>
+              </div>
+
               {/* Color-by dropdown — hidden on mobile (solid yellow path) */}
-              <div className="pt-1 border-t border-gray-600/50 hidden md:block">
-                <label className="block text-[10px] text-gray-400 mb-1 uppercase tracking-wide">{t('map.colorBy')}</label>
-                <Select
-                  value={colorBy}
-                  onChange={(v) => setColorBy(v as ColorByMode)}
-                  className="text-xs"
-                  options={COLOR_BY_OPTIONS.map((opt) => ({ value: opt.value, label: t(opt.labelKey) }))}
-                />
+              <div className="pt-2 border-t border-gray-600/50 hidden md:flex items-center justify-between gap-3">
+                <label className="text-xs text-gray-300">Color</label>
+                <div className="w-[110px]">
+                  <Select
+                    value={colorBy}
+                    onChange={(v) => setColorBy(v as ColorByMode)}
+                    className="text-xs"
+                    options={COLOR_BY_OPTIONS.map((opt) => ({ value: opt.value, label: t(opt.labelKey) }))}
+                  />
+                </div>
               </div>
 
               {/* Line thickness dropdown */}
-              <div className="pt-1 border-t border-gray-600/50">
-                <label className="block text-[10px] text-gray-400 mb-1 uppercase tracking-wide">{t('map.lineThickness')}</label>
-                <Select
-                  value={String(lineThickness)}
-                  onChange={(v) => setLineThickness(Number(v))}
-                  className="text-xs"
-                  options={[
-                    { value: '1', label: t('map.extraThin') },
-                    { value: '2', label: t('map.thin') },
-                    { value: '3', label: t('map.normal') },
-                    { value: '4', label: t('map.thick') },
-                    { value: '5', label: t('map.extraThick') },
-                  ]}
-                />
+              <div className="pt-2 border-t border-gray-600/50 flex items-center justify-between gap-3">
+                <label className="text-xs text-gray-300">Line</label>
+                <div className="w-[110px]">
+                  <Select
+                    value={String(lineThickness)}
+                    onChange={(v) => setLineThickness(Number(v))}
+                    className="text-xs"
+                    options={[
+                      { value: '1', label: t('map.extraThin') },
+                      { value: '2', label: t('map.thin') },
+                      { value: '3', label: t('map.normal') },
+                      { value: '4', label: t('map.thick') },
+                      { value: '5', label: t('map.extraThick') },
+                    ]}
+                  />
+                </div>
               </div>
 
               {/* Reset View — mobile only (desktop has floating button) */}

@@ -625,5 +625,14 @@
     "distanceM": "距离 (m)",
     "distanceFt": "距离 (ft)",
     "satellitesAxis": "卫星数"
+  },
+  "mapType": {
+    "default": "默认",
+    "satellite": "卫星",
+    "topo": "地形图",
+    "osm": "开放街道地图",
+    "alidade": "Alidade平滑",
+    "stamenTerrain": "Stamen地形",
+    "stamenWatercolor": "Stamen水彩"
   }
 }

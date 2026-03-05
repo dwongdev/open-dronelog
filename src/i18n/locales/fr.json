@@ -625,5 +625,14 @@
     "distanceM": "Distance (m)",
     "distanceFt": "Distance (ft)",
     "satellitesAxis": "Satellites"
+  },
+  "mapType": {
+    "default": "Par défaut",
+    "satellite": "Satellite",
+    "topo": "Topographique",
+    "osm": "OpenStreetMap",
+    "alidade": "Alidade Lisse",
+    "stamenTerrain": "Terrain Stamen",
+    "stamenWatercolor": "Aquarelle Stamen"
   }
 }

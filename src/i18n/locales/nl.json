@@ -625,5 +625,14 @@
     "distanceM": "Afstand (m)",
     "distanceFt": "Afstand (ft)",
     "satellitesAxis": "Satellieten"
+  },
+  "mapType": {
+    "default": "Standaard",
+    "satellite": "Satelliet",
+    "topo": "Topografisch",
+    "osm": "OpenStreetMap",
+    "alidade": "Alidade Vloeiend",
+    "stamenTerrain": "Stamen Terrein",
+    "stamenWatercolor": "Stamen Aquarel"
   }
 }

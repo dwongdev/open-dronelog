@@ -625,5 +625,14 @@
     "distanceM": "거리 (m)",
     "distanceFt": "거리 (ft)",
     "satellitesAxis": "위성 수"
+  },
+  "mapType": {
+    "default": "기본",
+    "satellite": "위성",
+    "topo": "지형도",
+    "osm": "오픈스트리트맵",
+    "alidade": "알리다드 스무스",
+    "stamenTerrain": "스타멘 지형",
+    "stamenWatercolor": "스타멘 수채화"
   }
 }

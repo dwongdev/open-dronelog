@@ -625,5 +625,14 @@
     "distanceM": "距離 (m)",
     "distanceFt": "距離 (ft)",
     "satellitesAxis": "衛星数"
+  },
+  "mapType": {
+    "default": "デフォルト",
+    "satellite": "衛星",
+    "topo": "地形図",
+    "osm": "オープンストリートマップ",
+    "alidade": "アリダードスムーズ",
+    "stamenTerrain": "スタメン地形",
+    "stamenWatercolor": "スタメン水彩"
   }
 }

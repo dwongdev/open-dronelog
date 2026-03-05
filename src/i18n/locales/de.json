@@ -446,7 +446,6 @@
     "pressure": "Luftdruck",
     "attribution": "Daten von Open-Meteo basierend auf Flugort und -zeit"
   },
-
   "report": {
     "title": "HTML-Bericht",
     "description": "Druckbaren Flugbericht konfigurieren und erstellen ({{n}} Flug/Flüge)",
@@ -626,5 +625,14 @@
     "distanceM": "Entfernung (m)",
     "distanceFt": "Entfernung (ft)",
     "satellitesAxis": "Satelliten"
+  },
+  "mapType": {
+    "default": "Standard",
+    "satellite": "Satellit",
+    "topo": "Topografisch",
+    "osm": "OpenStreetMap",
+    "alidade": "Alidade Smooth",
+    "stamenTerrain": "Stamen Terrain",
+    "stamenWatercolor": "Stamen Aquarell"
   }
 }

@@ -7,46 +7,14 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import Map, { Source, Layer, NavigationControl, Popup } from 'react-map-gl/maplibre';
 import type { MapRef, MapLayerMouseEvent } from 'react-map-gl/maplibre';
-import type { StyleSpecification } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { Flight } from '@/types';
 import { formatDuration, formatDistance, formatAltitude, formatDateTime } from '@/lib/utils';
 import type { UnitSystem } from '@/lib/utils';
 import { useTranslation } from 'react-i18next';
 import { useFlightStore } from '@/stores/flightStore';
-
-// ---------------------------------------------------------------------------
-// Map styles (shared with FlightMap)
-// ---------------------------------------------------------------------------
-
-const MAP_STYLES = {
-  dark: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
-  light: 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json',
-} as const;
-
-const SATELLITE_STYLE: StyleSpecification = {
-  version: 8,
-  glyphs: 'https://tiles.basemaps.cartocdn.com/fonts/{fontstack}/{range}.pbf',
-  sources: {
-    satellite: {
-      type: 'raster',
-      tiles: [
-        'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-      ],
-      tileSize: 256,
-      maxzoom: 18,
-      attribution: 'Tiles © Esri',
-    },
-  },
-  layers: [
-    {
-      id: 'satellite-base',
-      type: 'raster',
-      source: 'satellite',
-      paint: { 'raster-fade-duration': 150 },
-    },
-  ],
-};
+import { Select } from '@/components/ui/Select';
+import { type MapType, MAP_TYPE_OPTIONS, getMapStyle } from '@/lib/mapStyles';
 
 // ---------------------------------------------------------------------------
 // Layer styles
@@ -146,7 +114,23 @@ export function FlightClusterMap({
   const { t } = useTranslation();
   const mapRef = useRef<MapRef | null>(null);
   const hasFittedRef = useRef(false);
-  const [isSatellite, setIsSatellite] = useState(false);
+
+  // Initialize map type from session storage if possible, fallback to 'default'
+  const [mapType, setMapType] = useState<MapType>(() => {
+    if (typeof window !== 'undefined') {
+      const stored = window.sessionStorage.getItem('clusterMap:mapType');
+      return (stored as MapType) || 'default';
+    }
+    return 'default';
+  });
+
+  // Save to session storage whenever mapType changes
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.sessionStorage.setItem('clusterMap:mapType', mapType);
+    }
+  }, [mapType]);
+
   const [popupInfo, setPopupInfo] = useState<{
     longitude: number;
     latitude: number;
@@ -176,15 +160,15 @@ export function FlightClusterMap({
       if (!startTime) startTime = timestamp;
       const elapsed = timestamp - startTime;
       const progress = (elapsed % duration) / duration;
-      
+
       // Ease in-out sine wave for smooth pulsing
       const easedProgress = Math.sin(progress * Math.PI * 2) * 0.5 + 0.5;
-      
+
       // Pulse radius between 16 and 28
       setPulseRadius(16 + easedProgress * 12);
       // Pulse opacity between 0.1 and 0.35
       setPulseOpacity(0.1 + easedProgress * 0.25);
-      
+
       pulseAnimationRef.current = requestAnimationFrame(animate);
     };
 
@@ -228,12 +212,12 @@ export function FlightClusterMap({
   }, [themeMode]);
 
   // Derive a stable string key for the map style so <Map> remounts cleanly
-  // when switching between URL styles and the inline satellite style.
-  const styleMode = isSatellite ? 'satellite' : resolvedTheme;
+  // when switching between URL styles and inline styles.
+  const styleMode = mapType === 'default' ? resolvedTheme : mapType;
 
   const activeMapStyle = useMemo(
-    () => (isSatellite ? SATELLITE_STYLE : MAP_STYLES[resolvedTheme]),
-    [isSatellite, resolvedTheme],
+    () => getMapStyle(mapType, resolvedTheme),
+    [mapType, resolvedTheme],
   );
 
   // Update visible bounds when map moves (only if filter is enabled)
@@ -272,15 +256,15 @@ export function FlightClusterMap({
   const handleResetZoom = useCallback(() => {
     const map = mapRef.current;
     if (!map) return;
-    
+
     const flightsToFit = allFlights || flights;
     const coords = flightsToFit
       .filter((f): f is Flight & { homeLat: number; homeLon: number } =>
         f.homeLat != null && f.homeLon != null)
       .map((f) => [f.homeLon, f.homeLat] as [number, number]);
-    
+
     if (coords.length === 0) return;
-    
+
     if (coords.length === 1) {
       map.flyTo({ center: coords[0], zoom: 12, duration: 800 });
       return;
@@ -437,7 +421,7 @@ export function FlightClusterMap({
                 duration: 500,
               });
             })
-            .catch(() => {});
+            .catch(() => { });
         }
         return;
       }
@@ -495,7 +479,7 @@ export function FlightClusterMap({
   }
 
   return (
-    <div 
+    <div
       className={`card p-4 transition-all duration-300 resize-y overflow-hidden ${mapAreaFilterEnabled ? 'ring-2 ring-emerald-500/40 shadow-[0_0_15px_rgba(16,185,129,0.15)]' : ''}`}
       style={{ height: 480, minHeight: 480, maxHeight: 850 }}
     >
@@ -505,8 +489,8 @@ export function FlightClusterMap({
           <span className="text-emerald-400 ml-1">{t('clusterMap.globalFilterActive')}</span>
         )}
       </h3>
-      <div 
-        className="relative rounded-lg overflow-hidden" 
+      <div
+        className="relative rounded-lg overflow-hidden"
         style={{ height: 'calc(100% - 32px)' }}
       >
         <Map
@@ -533,12 +517,16 @@ export function FlightClusterMap({
         >
           <NavigationControl position="top-right" />
 
-          {/* Satellite toggle */}
-          <div className="map-overlay absolute top-2 left-2 z-10 bg-drone-dark/80 border border-gray-700 rounded-xl px-3 py-2 shadow-lg">
-            <ToggleRow
-              label={t('clusterMap.satellite')}
-              checked={isSatellite}
-              onChange={setIsSatellite}
+          {/* Map Style Selector */}
+          <div className="absolute top-2 left-2 z-10 w-44">
+            <Select
+              className="map-layer-select shadow-md"
+              value={mapType}
+              onChange={(val) => setMapType(val as MapType)}
+              options={MAP_TYPE_OPTIONS.map((opt) => ({
+                value: opt.value,
+                label: t(opt.labelKey as any),
+              }))}
             />
           </div>
 
@@ -610,80 +598,79 @@ export function FlightClusterMap({
             const isLight = resolvedTheme === 'light';
             const iconColor = isLight ? '#6366f1' : '#818cf8';
             return (
-            <Popup
-              longitude={popupInfo.longitude}
-              latitude={popupInfo.latitude}
-              anchor="bottom"
-              onClose={() => setPopupInfo(null)}
-              closeButton
-              closeOnClick
-              className={['flight-cluster-popup', resolvedTheme === 'dark' && 'flight-cluster-popup--dark'].filter(Boolean).join(' ')}
-              maxWidth="300px"
-              offset={12}
-            >
-              <div
-                className="cursor-pointer select-none"
-                onClick={() => {
-                  if (onSelectFlight) {
-                    onSelectFlight(popupInfo.flight.id);
-                    setPopupInfo(null);
-                  }
-                }}
+              <Popup
+                longitude={popupInfo.longitude}
+                latitude={popupInfo.latitude}
+                anchor="bottom"
+                onClose={() => setPopupInfo(null)}
+                closeButton
+                closeOnClick
+                className={['flight-cluster-popup', resolvedTheme === 'dark' && 'flight-cluster-popup--dark'].filter(Boolean).join(' ')}
+                maxWidth="300px"
+                offset={12}
               >
-                {/* Header strip */}
-                <div className="px-3.5 py-2.5" style={{ background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)' }}>
-                  <p className="text-[13px] font-semibold truncate leading-tight" style={{ color: '#ffffff' }}>
-                    {(() => { const name = popupInfo.flight.displayName || popupInfo.flight.fileName; return name.length > 20 ? name.slice(0, 20) + '…' : name; })()}
-                  </p>
-                  {(popupInfo.flight.aircraftName || popupInfo.flight.droneModel) && (
-                    <p className="text-[11px] truncate mt-0.5" style={{ color: '#c7d2fe' }}>
-                      {popupInfo.flight.aircraftName || popupInfo.flight.droneModel}
-                      {popupInfo.flight.aircraftName && popupInfo.flight.droneModel
-                        ? ` · ${popupInfo.flight.droneModel}`
-                        : ''}
+                <div
+                  className="cursor-pointer select-none"
+                  onClick={() => {
+                    if (onSelectFlight) {
+                      onSelectFlight(popupInfo.flight.id);
+                      setPopupInfo(null);
+                    }
+                  }}
+                >
+                  {/* Header strip */}
+                  <div className="px-3.5 py-2.5" style={{ background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)' }}>
+                    <p className="text-[13px] font-semibold truncate leading-tight" style={{ color: '#ffffff' }}>
+                      {(() => { const name = popupInfo.flight.displayName || popupInfo.flight.fileName; return name.length > 20 ? name.slice(0, 20) + '…' : name; })()}
                     </p>
+                    {(popupInfo.flight.aircraftName || popupInfo.flight.droneModel) && (
+                      <p className="text-[11px] truncate mt-0.5" style={{ color: '#c7d2fe' }}>
+                        {popupInfo.flight.aircraftName || popupInfo.flight.droneModel}
+                        {popupInfo.flight.aircraftName && popupInfo.flight.droneModel
+                          ? ` · ${popupInfo.flight.droneModel}`
+                          : ''}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Stats grid */}
+                  <div className="popup-body px-3.5 py-2.5 space-y-1.5">
+                    <PopupStatRow
+                      icon={<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={iconColor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>}
+                      label={t('clusterMap.date')}
+                      value={formatDateTime(popupInfo.flight.startTime, dateLocale, timeFormat !== '24h')}
+                    />
+                    <PopupStatRow
+                      icon={<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={iconColor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>}
+                      label={t('clusterMap.duration')}
+                      value={formatDuration(popupInfo.flight.durationSecs)}
+                    />
+                    <PopupStatRow
+                      icon={<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={iconColor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12" /></svg>}
+                      label={t('clusterMap.distance')}
+                      value={formatDistance(popupInfo.flight.totalDistance, unitSystem, locale)}
+                    />
+                    <PopupStatRow
+                      icon={<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={iconColor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z" /><path d="M2 17l10 5 10-5" /><path d="M2 12l10 5 10-5" /></svg>}
+                      label={t('clusterMap.maxAlt')}
+                      value={formatAltitude(popupInfo.flight.maxAltitude, unitSystem, locale)}
+                    />
+                  </div>
+
+                  {/* Footer CTA */}
+                  {onSelectFlight && (
+                    <div className="popup-footer px-3.5 pb-2.5">
+                      <div className={`flex items-center justify-center gap-1 text-[11px] font-medium rounded-md py-1.5 transition-colors ${isLight
+                          ? 'text-indigo-600 bg-indigo-50 hover:bg-indigo-100'
+                          : 'text-indigo-300 bg-indigo-500/15 hover:bg-indigo-500/25'
+                        }`}>
+                        <span>{t('clusterMap.viewDetails')}</span>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6" /></svg>
+                      </div>
+                    </div>
                   )}
                 </div>
-
-                {/* Stats grid */}
-                <div className="popup-body px-3.5 py-2.5 space-y-1.5">
-                  <PopupStatRow
-                    icon={<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={iconColor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>}
-                    label={t('clusterMap.date')}
-                    value={formatDateTime(popupInfo.flight.startTime, dateLocale, timeFormat !== '24h')}
-                  />
-                  <PopupStatRow
-                    icon={<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={iconColor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>}
-                    label={t('clusterMap.duration')}
-                    value={formatDuration(popupInfo.flight.durationSecs)}
-                  />
-                  <PopupStatRow
-                    icon={<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={iconColor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>}
-                    label={t('clusterMap.distance')}
-                    value={formatDistance(popupInfo.flight.totalDistance, unitSystem, locale)}
-                  />
-                  <PopupStatRow
-                    icon={<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={iconColor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>}
-                    label={t('clusterMap.maxAlt')}
-                    value={formatAltitude(popupInfo.flight.maxAltitude, unitSystem, locale)}
-                  />
-                </div>
-
-                {/* Footer CTA */}
-                {onSelectFlight && (
-                  <div className="popup-footer px-3.5 pb-2.5">
-                    <div className={`flex items-center justify-center gap-1 text-[11px] font-medium rounded-md py-1.5 transition-colors ${
-                      isLight
-                        ? 'text-indigo-600 bg-indigo-50 hover:bg-indigo-100'
-                        : 'text-indigo-300 bg-indigo-500/15 hover:bg-indigo-500/25'
-                    }`}>
-                      <span>{t('clusterMap.viewDetails')}</span>
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </Popup>
+              </Popup>
             );
           })()}
         </Map>
@@ -695,40 +682,6 @@ export function FlightClusterMap({
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
-
-function ToggleRow({
-  label,
-  checked,
-  onChange,
-}: {
-  label: string;
-  checked: boolean;
-  onChange: (value: boolean) => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={() => onChange(!checked)}
-      className="w-full flex items-center justify-between gap-3 text-xs text-gray-300 hover:text-white transition-colors"
-      aria-pressed={checked}
-    >
-      <span>{label}</span>
-      <span
-        className={`relative inline-flex h-5 w-9 items-center rounded-full border transition-all ${
-          checked
-            ? 'bg-drone-primary/90 border-drone-primary'
-            : 'bg-drone-surface border-gray-600 toggle-track-off'
-        }`}
-      >
-        <span
-          className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
-            checked ? 'translate-x-4' : 'translate-x-1'
-          }`}
-        />
-      </span>
-    </button>
-  );
-}
 
 function PopupStatRow({
   icon,
