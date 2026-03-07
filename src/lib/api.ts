@@ -57,9 +57,10 @@ function profileHeaders(): Record<string, string> {
 }
 
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
+  const { headers: optionHeaders, ...restOptions } = options || {};
   const response = await fetch(`${API_BASE}${url}`, {
-    headers: { 'Content-Type': 'application/json', ...profileHeaders(), ...options?.headers },
-    ...options,
+    headers: { 'Content-Type': 'application/json', ...profileHeaders(), ...optionHeaders },
+    ...restOptions,
   });
   if (!response.ok) {
     const body = await response.text();
