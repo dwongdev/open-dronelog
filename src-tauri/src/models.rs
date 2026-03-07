@@ -17,6 +17,7 @@ pub struct FlightMetadata {
     pub drone_serial: Option<String>,
     pub aircraft_name: Option<String>,
     pub battery_serial: Option<String>,
+    pub cycle_count: Option<i32>,
     pub start_time: Option<DateTime<Utc>>,
     pub end_time: Option<DateTime<Utc>>,
     pub duration_secs: Option<f64>,
@@ -42,6 +43,7 @@ pub struct Flight {
     pub drone_serial: Option<String>,
     pub aircraft_name: Option<String>,
     pub battery_serial: Option<String>,
+    pub cycle_count: Option<i32>,
     pub start_time: Option<String>,
     pub duration_secs: Option<f64>,
     pub total_distance: Option<f64>,
@@ -207,6 +209,8 @@ pub struct BatteryUsage {
     pub flight_count: i64,
     /// Total flight duration for this battery in seconds
     pub total_duration_secs: f64,
+    /// Max battery cycle count observed for this battery (from SmartBatteryStatic)
+    pub max_cycle_count: Option<i32>,
 }
 
 /// Drone usage summary

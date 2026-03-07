@@ -81,14 +81,18 @@ export function Overview({ stats, flights, unitSystem, onSelectFlight }: Overvie
     const maxSpeedMs = Math.max(0, ...filteredFlights.map((f) => f.maxSpeed ?? 0));
 
     // Battery usage (normalize serials for consistent aggregation)
-    const batteryMap = new Map<string, { count: number; duration: number }>();
+    const batteryMap = new Map<string, { count: number; duration: number; maxCycleCount: number | null }>();
     filteredFlights.forEach((f) => {
       const serial = normalizeSerial(f.batterySerial);
       if (serial) {
-        const existing = batteryMap.get(serial) || { count: 0, duration: 0 };
+        const existing = batteryMap.get(serial) || { count: 0, duration: 0, maxCycleCount: null as number | null };
+        const newMaxCycle = f.cycleCount != null
+          ? (existing.maxCycleCount != null ? Math.max(existing.maxCycleCount, f.cycleCount) : f.cycleCount)
+          : existing.maxCycleCount;
         batteryMap.set(serial, {
           count: existing.count + 1,
           duration: existing.duration + (f.durationSecs ?? 0),
+          maxCycleCount: newMaxCycle,
         });
       }
     });
@@ -97,6 +101,7 @@ export function Overview({ stats, flights, unitSystem, onSelectFlight }: Overvie
         batterySerial: serial,
         flightCount: data.count,
         totalDurationSecs: data.duration,
+        maxCycleCount: data.maxCycleCount,
       }))
       .sort((a, b) => b.flightCount - a.flightCount);
 
@@ -1358,7 +1363,7 @@ function BatteryHealthList({
   renameBattery,
   hideSerialNumbers,
 }: {
-  batteries: { batterySerial: string; flightCount: number; totalDurationSecs: number }[];
+  batteries: { batterySerial: string; flightCount: number; totalDurationSecs: number; maxCycleCount: number | null }[];
   points: BatteryHealthPoint[];
   isLight: boolean;
   getBatteryDisplayName: (serial: string) => string;
@@ -1579,7 +1584,10 @@ function BatteryHealthList({
     <div className="space-y-4">
       <div className="space-y-2 max-h-[200px] overflow-y-auto" style={{ padding: '0 16px 0 10px' }}>
         {batteries.map((battery) => {
-          const healthPercent = Math.max(0, 100 - (battery.flightCount / maxCycles) * 100);
+          const cycleCount = battery.maxCycleCount;
+          const healthPercent = cycleCount != null
+            ? Math.max(0, 100 - (cycleCount / maxCycles) * 100)
+            : Math.max(0, 100 - (battery.flightCount / maxCycles) * 100);
           const healthColor =
             healthPercent > 70 ? '#10b981' : healthPercent > 40 ? '#f59e0b' : '#ef4444';
           const displayName = getBatteryDisplayName(battery.batterySerial);
@@ -1654,7 +1662,9 @@ function BatteryHealthList({
                     {healthPercent.toFixed(0)}%
                   </span>
                   <span className="hidden md:inline-block w-[90px] md:w-[150px] flex-shrink-0 text-gray-400 text-[9px] md:text-[10px] text-right md:text-left truncate">
-                    {t('overview.flightsAndDuration', { n: battery.flightCount, duration: formatDuration(battery.totalDurationSecs) })}
+                    {cycleCount != null
+                      ? t('overview.cycleCountAndDuration', { n: cycleCount, duration: formatDuration(battery.totalDurationSecs) })
+                      : t('overview.flightsAndDuration', { n: battery.flightCount, duration: formatDuration(battery.totalDurationSecs) })}
                   </span>
                 </div>
               )}
@@ -1677,7 +1687,7 @@ function BatteryHealthList({
 }
 
 interface MaintenanceSectionProps {
-  batteries: { batterySerial: string; flightCount: number; totalDurationSecs: number }[];
+  batteries: { batterySerial: string; flightCount: number; totalDurationSecs: number; maxCycleCount: number | null }[];
   drones: { droneModel: string; droneSerial: string | null; aircraftName: string | null; flightCount: number; totalDurationSecs: number; displayLabel: string }[];
   flights: Flight[];
   isLight: boolean;

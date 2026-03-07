@@ -89,6 +89,7 @@ export function buildCsv(data: FlightDataResponse): string {
     drone_serial: flight.droneSerial,
     aircraft_name: flight.aircraftName,
     battery_serial: flight.batterySerial,
+    cycle_count: flight.cycleCount,
     start_time: flight.startTime,
     duration_secs: flight.durationSecs,
     total_distance_m: flight.totalDistance,

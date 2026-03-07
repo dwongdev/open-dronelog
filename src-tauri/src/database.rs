@@ -206,6 +206,7 @@ impl Database {
                 point_count     INTEGER,                 -- Number of telemetry points
                 photo_count     INTEGER,                 -- Number of photos taken
                 video_count     INTEGER,                 -- Number of video recordings
+                cycle_count     INTEGER,                 -- Battery cycle count (from SmartBatteryStatic)
                 imported_at     TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                 notes           VARCHAR,
                 color           VARCHAR DEFAULT '#7dd3fc'  -- Flight color label (hex, default light blue)
@@ -377,6 +378,7 @@ impl Database {
             ("photo_count", "ALTER TABLE flights ADD COLUMN photo_count INTEGER"),
             ("video_count", "ALTER TABLE flights ADD COLUMN video_count INTEGER"),
             ("color", "ALTER TABLE flights ADD COLUMN color VARCHAR DEFAULT '#7dd3fc'"),
+            ("cycle_count", "ALTER TABLE flights ADD COLUMN cycle_count INTEGER"),
         ];
 
         let need_backfill = !columns.contains("photo_count");
@@ -861,11 +863,11 @@ impl Database {
             r#"
             INSERT INTO flights (
                 id, file_name, display_name, file_hash, drone_model, drone_serial,
-                aircraft_name, battery_serial,
+                aircraft_name, battery_serial, cycle_count,
                 start_time, end_time, duration_secs, total_distance,
                 max_altitude, max_speed, home_lat, home_lon, point_count,
                 photo_count, video_count
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
             params![
                 flight.id,
@@ -876,6 +878,7 @@ impl Database {
                 flight.drone_serial,
                 flight.aircraft_name,
                 flight.battery_serial,
+                flight.cycle_count,
                 flight.start_time.map(|t| t.to_rfc3339()),
                 flight.end_time.map(|t| t.to_rfc3339()),
                 flight.duration_secs,
@@ -992,7 +995,8 @@ impl Database {
                 CAST(start_time AS VARCHAR) AS start_time,
                 duration_secs, total_distance,
                 max_altitude, max_speed, home_lat, home_lon, point_count,
-                photo_count, video_count, notes, COALESCE(color, '#7dd3fc') AS color
+                photo_count, video_count, notes, COALESCE(color, '#7dd3fc') AS color,
+                cycle_count
             FROM flights
             ORDER BY start_time DESC
             "#,
@@ -1009,6 +1013,7 @@ impl Database {
                     drone_serial: row.get(5)?,
                     aircraft_name: row.get(6)?,
                     battery_serial: row.get(7)?,
+                    cycle_count: row.get(20)?,
                     start_time: row.get(8)?,
                     duration_secs: row.get(9)?,
                     total_distance: row.get(10)?,
@@ -1069,7 +1074,8 @@ impl Database {
                 CAST(start_time AS VARCHAR) AS start_time,
                 duration_secs, total_distance,
                 max_altitude, max_speed, home_lat, home_lon, point_count,
-                photo_count, video_count, notes, COALESCE(color, '#7dd3fc') AS color
+                photo_count, video_count, notes, COALESCE(color, '#7dd3fc') AS color,
+                cycle_count
             FROM flights
             WHERE id = ?
             "#,
@@ -1084,6 +1090,7 @@ impl Database {
                     drone_serial: row.get(5)?,
                     aircraft_name: row.get(6)?,
                     battery_serial: row.get(7)?,
+                    cycle_count: row.get(20)?,
                     start_time: row.get(8)?,
                     duration_secs: row.get(9)?,
                     total_distance: row.get(10)?,
@@ -1441,10 +1448,11 @@ impl Database {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?)),
             )?;
 
-        // Battery usage with total duration
+        // Battery usage with total duration and max cycle count
         let mut stmt = conn.prepare(
             r#"
-            SELECT battery_serial, COUNT(*)::BIGINT AS flight_count, COALESCE(SUM(duration_secs), 0)::DOUBLE AS total_duration
+            SELECT battery_serial, COUNT(*)::BIGINT AS flight_count, COALESCE(SUM(duration_secs), 0)::DOUBLE AS total_duration,
+                   MAX(cycle_count)::INTEGER AS max_cycle_count
             FROM flights
             WHERE battery_serial IS NOT NULL AND battery_serial <> ''
             GROUP BY battery_serial
@@ -1458,6 +1466,7 @@ impl Database {
                     battery_serial: row.get(0)?,
                     flight_count: row.get(1)?,
                     total_duration_secs: row.get(2)?,
+                    max_cycle_count: row.get(3)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;

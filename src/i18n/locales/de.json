@@ -255,6 +255,7 @@
     "batteryName": "Batteriename",
     "renameBattery": "Batterie umbenennen",
     "flightsAndDuration": "{{n}} Flüge · {{duration}}",
+    "cycleCountAndDuration": "{{n}} Zyklen · {{duration}}",
     "maintenance": "Wartung",
     "batteryMaintenance": "Batteriewartung",
     "aircraftMaintenance": "Fluggerätewartung",

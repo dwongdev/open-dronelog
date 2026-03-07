@@ -19,6 +19,7 @@ export interface Flight {
   droneSerial: string | null;
   aircraftName: string | null;
   batterySerial: string | null;
+  cycleCount: number | null;
   startTime: string | null;
   durationSecs: number | null;
   totalDistance: number | null;
@@ -92,6 +93,7 @@ export interface BatteryUsage {
   batterySerial: string;
   flightCount: number;
   totalDurationSecs: number;
+  maxCycleCount: number | null;
 }
 
 export interface DroneUsage {

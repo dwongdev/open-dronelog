@@ -468,6 +468,7 @@ mod tauri_app {
             drone_serial: Some(drone_serial.trim().to_uppercase()),
             aircraft_name: Some(aircraft_name),
             battery_serial: Some(battery_serial.trim().to_uppercase()),
+            cycle_count: None,
             start_time: Some(parsed_start_time),
             end_time: Some(end_time),
             duration_secs: Some(duration_secs),
@@ -1069,6 +1070,7 @@ mod tauri_app {
             drone_serial: flight.drone_serial.clone(),
             aircraft_name: flight.aircraft_name.clone(),
             battery_serial: flight.battery_serial.clone(),
+            cycle_count: flight.cycle_count,
             start_time: flight.start_time.as_deref()
                 .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
                 .map(|dt| dt.with_timezone(&chrono::Utc))
@@ -1138,6 +1140,7 @@ mod tauri_app {
                         drone_serial: flight.drone_serial.clone(),
                         aircraft_name: flight.aircraft_name.clone(),
                         battery_serial: flight.battery_serial.clone(),
+                        cycle_count: flight.cycle_count,
                         start_time: flight.start_time.as_deref()
                             .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
                             .map(|dt| dt.with_timezone(&chrono::Utc))

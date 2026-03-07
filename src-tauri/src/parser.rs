@@ -21,6 +21,7 @@ use tokio::time::timeout;
 use dji_log_parser::frame::{records_to_frames, Frame};
 use dji_log_parser::layout::auxiliary::Department;
 use dji_log_parser::record::component_serial::ComponentType;
+use dji_log_parser::record::smart_battery_group::SmartBatteryGroup;
 use dji_log_parser::record::Record;
 use dji_log_parser::DJILog;
 
@@ -42,6 +43,8 @@ const PARSE_TIMEOUT_SECS: u64 = 40;
 struct ComponentSerials {
     aircraft: Option<String>,
     battery: Option<String>,
+    /// Battery cycle count extracted from SmartBatteryStatic.loop_times (divided by 256)
+    cycle_count: Option<i32>,
 }
 
 /// Scan raw records for ComponentSerial entries and return full-length serials.
@@ -63,6 +66,18 @@ fn extract_component_serials(records: &[Record]) -> ComponentSerials {
                     result.battery = Some(sn);
                 }
                 _ => {}
+            }
+        }
+        // Extract cycle count from SmartBatteryStatic records
+        if let Record::SmartBatteryGroup(SmartBatteryGroup::SmartBatteryStatic(ref sbs)) = record {
+            let raw = sbs.loop_times as i32;
+            let normalized = raw / 256;
+            if normalized > 0 {
+                log::debug!("SmartBatteryStatic: loop_times={} -> cycle_count={}", raw, normalized);
+                // Keep the maximum cycle count seen across all SmartBatteryStatic records
+                result.cycle_count = Some(
+                    result.cycle_count.map_or(normalized, |prev| prev.max(normalized))
+                );
             }
         }
     }
@@ -319,6 +334,7 @@ impl<'a> LogParser<'a> {
             aircraft_name: self.extract_aircraft_name(&parser),
             battery_serial: component_serials.battery.clone()
                 .or_else(|| self.extract_battery_serial(&parser)),
+            cycle_count: component_serials.cycle_count,
             start_time: self.extract_start_time(&parser),
             end_time: self.extract_end_time(&parser),
             duration_secs: Some(

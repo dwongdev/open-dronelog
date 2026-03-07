@@ -415,6 +415,7 @@ impl<'a> LitchiParser<'a> {
             battery_serial: col_map.get_str(first_row, "BatterySerialNumber")
                 .map(|s| s.trim().to_uppercase())
                 .filter(|s| !s.is_empty()),
+            cycle_count: None,
             start_time,
             end_time,
             duration_secs,

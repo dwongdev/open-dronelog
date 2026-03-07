@@ -598,6 +598,7 @@ impl<'a> AirdataParser<'a> {
             drone_serial: None,    // not in CSV
             aircraft_name: None,   // not in CSV
             battery_serial: None,  // not in CSV
+            cycle_count: None,
             start_time,
             end_time,
             duration_secs,
