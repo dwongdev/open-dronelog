@@ -213,11 +213,40 @@ const COLOR_BY_OPTIONS: { value: ColorByMode; labelKey: string }[] = [
 ];
 
 // ─── Arrow icon for replay marker ───────────────────────────────────────────
-// SVG arrow pointing up (North), rendered as a data URL for IconLayer
-const ARROW_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
-  <path d="M16 2 L26 28 L16 22 L6 28 Z" fill="#00d4aa" stroke="white" stroke-width="2" stroke-linejoin="round"/>
-</svg>`;
-const ARROW_ICON_URL = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(ARROW_ICON_SVG)}`;
+// Pre-render the arrow onto a canvas so the IconLayer has a synchronous atlas.
+// This avoids async image-loading issues when deck.gl runs inside MapboxOverlay
+// (MapLibre never gets a repaint request after a data-URL finishes loading).
+const ARROW_ATLAS_SIZE = 64;
+const arrowAtlasCanvas: HTMLCanvasElement | null = (() => {
+  if (typeof document === 'undefined') return null;
+  const canvas = document.createElement('canvas');
+  canvas.width = ARROW_ATLAS_SIZE;
+  canvas.height = ARROW_ATLAS_SIZE;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+  // Scale the original 32×32 path up to 64×64 for crispness
+  const s = ARROW_ATLAS_SIZE / 32;
+  ctx.save();
+  ctx.scale(s, s);
+  ctx.beginPath();
+  ctx.moveTo(16, 2);
+  ctx.lineTo(26, 28);
+  ctx.lineTo(16, 22);
+  ctx.lineTo(6, 28);
+  ctx.closePath();
+  ctx.fillStyle = '#00d4aa';
+  ctx.fill();
+  ctx.strokeStyle = 'white';
+  ctx.lineWidth = 2;
+  ctx.lineJoin = 'round';
+  ctx.stroke();
+  ctx.restore();
+  return canvas;
+})();
+
+const ARROW_ICON_MAPPING: Record<string, { x: number; y: number; width: number; height: number; anchorX: number; anchorY: number }> = {
+  arrow: { x: 0, y: 0, width: ARROW_ATLAS_SIZE, height: ARROW_ATLAS_SIZE, anchorX: ARROW_ATLAS_SIZE / 2, anchorY: ARROW_ATLAS_SIZE / 2 },
+};
 
 /**
  * Integrates deck.gl layers into MapLibre's own WebGL context via MapboxOverlay.
@@ -574,23 +603,19 @@ export function FlightMap({ track, homeLat, homeLon, durationSecs, telemetry, th
         parameters: { depthTest: false },
       }),
       // Arrow icon showing heading direction (fixed pixel size)
-      new IconLayer({
+      ...(arrowAtlasCanvas ? [new IconLayer({
         id: 'replay-marker-arrow',
         data: [{ position: pos, angle: yaw }],
         getPosition: (d: { position: [number, number, number] }) => d.position,
-        getIcon: () => ({
-          url: ARROW_ICON_URL,
-          width: 32,
-          height: 32,
-          anchorY: 16,
-          anchorX: 16,
-        }),
+        iconAtlas: arrowAtlasCanvas as any,
+        iconMapping: ARROW_ICON_MAPPING,
+        getIcon: () => 'arrow',
         getSize: 28,
         sizeUnits: 'pixels',
         getAngle: (d: { angle: number }) => -d.angle, // Negative because IconLayer rotates counter-clockwise
         billboard: false,
         parameters: { depthTest: false },
-      }),
+      })] : []),
     ];
   }, [showAircraft, replayMarkerPos, isPlaying, replayProgress, telemetry?.yaw]);
 
