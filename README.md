@@ -467,6 +467,9 @@ For production deployments, a reverse proxy with TLS is essential.
 
 ## How to obtain your own DJI Developer API key
 
+> [!NOTE]
+> Unless you set up your own API key, the import process will be rate limited because you are using a shared key (provided by me) for the project alongside other users. You may see a 5 second `cooling down...` message during each new log file import when the default key is in use. 
+
 I have shipped this project with my own API key to save you from some extra painful steps. If you are tech savvy please read the following guide to generate and use your own API key for this project. To acquire an apiKey, follow these steps:
 
 1. Visit [DJI Developer Technologies](https://developer.dji.com/user) and log in. Create an account if you don't have one, this is different registration than your existing DJI account, but you can login with your existing account as well. 
