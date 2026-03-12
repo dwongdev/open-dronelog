@@ -178,14 +178,14 @@ interface FlightState {
 
   // Maintenance tracking state
   maintenanceThresholds: {
-    battery: { flights: number; airtime: number };  // airtime in hours
-    aircraft: { flights: number; airtime: number }; // airtime in hours
+    battery: { flights: number; airtime: number; days: number };  // airtime in hours, days = overdue threshold
+    aircraft: { flights: number; airtime: number; days: number }; // airtime in hours, days = overdue threshold
   };
   maintenanceLastReset: {
     battery: Record<string, string>;  // batterySerial -> ISO timestamp
     aircraft: Record<string, string>; // droneSerial -> ISO timestamp
   };
-  setMaintenanceThreshold: (type: 'battery' | 'aircraft', field: 'flights' | 'airtime', value: number) => void;
+  setMaintenanceThreshold: (type: 'battery' | 'aircraft', field: 'flights' | 'airtime' | 'days', value: number) => void;
   performMaintenance: (type: 'battery' | 'aircraft', serial: string, date?: Date) => void;
   getMaintenanceLastReset: (type: 'battery' | 'aircraft', serial: string) => string | null;
 
@@ -335,12 +335,18 @@ export const useFlightStore = create<FlightState>((set, get) => ({
 
   // Maintenance tracking state
   maintenanceThresholds: (() => {
-    if (typeof localStorage === 'undefined') return { battery: { flights: 100, airtime: 50 }, aircraft: { flights: 100, airtime: 50 } };
+    const defaults = { battery: { flights: 100, airtime: 50, days: 120 }, aircraft: { flights: 100, airtime: 50, days: 120 } };
+    if (typeof localStorage === 'undefined') return defaults;
     try {
       const stored = localStorage.getItem('maintenanceThresholds');
-      return stored ? JSON.parse(stored) : { battery: { flights: 100, airtime: 50 }, aircraft: { flights: 100, airtime: 50 } };
+      if (!stored) return defaults;
+      const parsed = JSON.parse(stored);
+      // Migrate: add days field if missing from older stored data
+      if (parsed.battery && parsed.battery.days === undefined) parsed.battery.days = 120;
+      if (parsed.aircraft && parsed.aircraft.days === undefined) parsed.aircraft.days = 120;
+      return parsed;
     } catch {
-      return { battery: { flights: 100, airtime: 50 }, aircraft: { flights: 100, airtime: 50 } };
+      return defaults;
     }
   })(),
   maintenanceLastReset: (() => {
