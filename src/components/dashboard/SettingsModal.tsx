@@ -11,6 +11,8 @@ import { Select } from '@/components/ui/Select';
 import { PasswordInput } from '@/components/ui/PasswordInput';
 import { getBlacklist, clearBlacklist } from './FlightImporter';
 import { SMART_TAG_TYPES, getEnabledSmartTagTypes, setEnabledSmartTagTypes, SmartTagTypeId } from '@/lib/api';
+import { FaDiscord, FaGithub, FaRedditAlien } from 'react-icons/fa';
+import { FiMail } from 'react-icons/fi';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -1106,6 +1108,61 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     </svg>
                     {t('settings.exploreMore', 'Explore more')}
                   </a>
+                </div>
+
+                <div className="mt-4 pt-4 border-t border-gray-700">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+                    {t('settings.needHelp', 'Need Help?')}
+                  </p>
+                  <div className="mt-2 grid grid-cols-2 gap-2">
+                    <a
+                      href="https://opendronelog.com/#about"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="group px-3 py-2 rounded-lg border border-gray-700 text-gray-200 bg-drone-dark/60 hover:bg-sky-500/10 hover:border-sky-500/50 focus:outline-none focus:ring-2 focus:ring-sky-500/40 transition-all text-sm font-medium flex items-center justify-center gap-2 no-underline"
+                    >
+                      <span className="inline-flex items-center justify-center w-5 h-5 rounded-md bg-sky-500/15 text-sky-400 group-hover:bg-sky-500/20 transition-colors">
+                        <FiMail className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                      </span>
+                      {t('settings.contact', 'Contact')}
+                    </a>
+
+                    <a
+                      href="https://github.com/arpanghosh8453/open-dronelog/issues/new/choose"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="group px-3 py-2 rounded-lg border border-gray-700 text-gray-200 bg-drone-dark/60 hover:bg-rose-500/10 hover:border-rose-500/50 focus:outline-none focus:ring-2 focus:ring-rose-500/40 transition-all text-sm font-medium flex items-center justify-center gap-2 no-underline"
+                    >
+                      <span className="inline-flex items-center justify-center w-5 h-5 rounded-md bg-rose-500/15 text-rose-400 group-hover:bg-rose-500/20 transition-colors">
+                        <FaGithub className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                      </span>
+                      {t('settings.reportBug', 'Report Bug')}
+                    </a>
+
+                    <a
+                      href="https://www.reddit.com/r/opendronelog"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="group px-3 py-2 rounded-lg border border-gray-700 text-gray-200 bg-drone-dark/60 hover:bg-orange-500/10 hover:border-orange-500/50 focus:outline-none focus:ring-2 focus:ring-orange-500/40 transition-all text-sm font-medium flex items-center justify-center gap-2 no-underline"
+                    >
+                      <span className="inline-flex items-center justify-center w-5 h-5 rounded-md bg-orange-500/15 text-orange-400 group-hover:bg-orange-500/20 transition-colors">
+                        <FaRedditAlien className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                      </span>
+                      {t('settings.reddit', 'Reddit')}
+                    </a>
+
+                    <a
+                      href="https://discord.gg/YKgKTmSm7B"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="group px-3 py-2 rounded-lg border border-gray-700 text-gray-200 bg-drone-dark/60 hover:bg-indigo-500/10 hover:border-indigo-500/50 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 transition-all text-sm font-medium flex items-center justify-center gap-2 no-underline"
+                    >
+                      <span className="inline-flex items-center justify-center w-5 h-5 rounded-md bg-indigo-500/15 text-indigo-400 group-hover:bg-indigo-500/20 transition-colors">
+                        <FaDiscord className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                      </span>
+                      {t('settings.discord', 'Discord')}
+                    </a>
+                  </div>
                 </div>
               </div>
 
