@@ -90,7 +90,7 @@
       "modules": {
         "main.rs": "Entry point; feature-gated Tauri commands (desktop) or run_web() (Docker)",
         "server.rs": "Axum REST API router with all HTTP endpoints mirroring Tauri commands",
-        "database.rs": "DuckDB connection manager, schema creation, migrations, CRUD operations, backup/restore",
+        "database.rs": "DuckDB connection manager, schema creation, migrations, CRUD operations, backup/restore, and sync blacklist persistence",
         "parser.rs": "DJI log parser wrapper, telemetry extraction, smart tag generation, reverse geocoding, flight message extraction",
         "litchi_parser.rs": "Litchi CSV parser with auto unit detection (feet/meters, mph/m/s)",
         "airdata_parser.rs": "Airdata CSV parser with comprehensive field mapping",
@@ -306,6 +306,17 @@
           "Backfilled on first startup from existing flights with user-modified data",
           "Included in backup/restore archives"
         ]
+      },
+      "sync_blacklist": {
+        "description": "Per-profile server-side blacklist of deleted file hashes used by sync to skip re-importing previously deleted logs.",
+        "columns": [
+          "file_hash (VARCHAR PK — SHA256 hash of original log file)",
+          "created_at (TIMESTAMPTZ)"
+        ],
+        "notes": [
+          "Checked by /api/sync/files, /api/sync/file, /api/sync, and scheduled sync jobs",
+          "Manual drag-drop/browse import removes the matching hash from blacklist on successful import"
+        ]
       }
     },
     "migrations": "Schema migrations run on startup — add missing columns, type upgrades (DOUBLE→FLOAT), primary key expansions, flight_customizations backfill. Non-destructive: never drops existing data.",
@@ -322,7 +333,7 @@
       "third_party_support": "Dronelink and DroneDeploy logs supported via DJIFly department fallback. Auto-tagged with 'M-SDK'.",
       "deduplication": "Dual-layer: file hash (SHA256) prevents re-importing the same file; flight signature (drone_serial + battery_serial + exact start_time) prevents importing the same flight from different export versions.",
       "batch_import": "Multi-file selection with per-file progress counter (X of Y), cooldown between files, duplicate skip tracking.",
-      "folder_sync": "Web/Docker mode: mount a folder via SYNC_LOGS_PATH, import unprocessed files manually or on a cron schedule (SYNC_INTERVAL).",
+      "folder_sync": "Web/Docker mode: mount a folder via SYNC_LOGS_PATH, import unprocessed files manually or on a cron schedule (SYNC_INTERVAL). Sync blacklist is persisted server-side in DuckDB (per profile) and honored by all sync paths.",
       "keep_uploaded_files": "Optional feature to retain copies of log files with SHA256 hash-based filename deduplication. Enabled by default on desktop.",
       "manual_entry": "Create flight records without log files — collects aircraft, serials, coordinates, duration, optional distance/altitude/notes. Auto-tagged 'Manual Entry'. Date pickers support typed YYYY-MM-DD quick entry.",
       "external_parser_plugins": "Load custom external parser plugins via parsers.json (desktop and web/docker supported paths).",
@@ -562,6 +573,10 @@
     ],
     "sync": [
       "GET    /api/sync/config         — Get sync folder config (syncPath, syncInterval)",
+      "GET    /api/sync/blacklist      — List persisted sync blacklist hashes",
+      "POST   /api/sync/blacklist      — Add hash to sync blacklist (JSON: fileHash)",
+      "DELETE /api/sync/blacklist      — Remove hash from sync blacklist (query: file_hash)",
+      "DELETE /api/sync/blacklist/all  — Clear sync blacklist",
       "GET    /api/sync/files          — List files not yet imported",
       "POST   /api/sync/file           — Import single file (JSON: filename)",
       "POST   /api/sync                — Import all pending files"

@@ -701,6 +701,10 @@ export interface SyncFileResponse {
   fileHash: string | null;
 }
 
+export interface SyncBlacklistResponse {
+  hashes: string[];
+}
+
 /**
  * Get the sync folder configuration (web mode only).
  * Returns the configured SYNC_LOGS_PATH if set on the server.
@@ -721,6 +725,47 @@ export async function getSyncFiles(): Promise<SyncFilesResponse> {
     return { files: [], syncPath: null, message: 'Not in web mode' };
   }
   return fetchJson<SyncFilesResponse>('/sync/files');
+}
+
+/** Get all persisted sync blacklist hashes for the active profile. */
+export async function getSyncBlacklist(): Promise<string[]> {
+  if (isWeb) {
+    const result = await fetchJson<SyncBlacklistResponse>('/sync/blacklist');
+    return result.hashes;
+  }
+  const invoke = await getTauriInvoke();
+  return invoke('get_sync_blacklist') as Promise<string[]>;
+}
+
+/** Add a hash to the persisted sync blacklist. */
+export async function addToSyncBlacklist(fileHash: string): Promise<boolean> {
+  if (isWeb) {
+    return fetchJson<boolean>('/sync/blacklist', {
+      method: 'POST',
+      body: JSON.stringify({ fileHash }),
+    });
+  }
+  const invoke = await getTauriInvoke();
+  return invoke('add_to_sync_blacklist', { fileHash }) as Promise<boolean>;
+}
+
+/** Remove a hash from the persisted sync blacklist. */
+export async function removeFromSyncBlacklist(fileHash: string): Promise<boolean> {
+  if (isWeb) {
+    const params = new URLSearchParams({ file_hash: fileHash });
+    return fetchJson<boolean>(`/sync/blacklist?${params}`, { method: 'DELETE' });
+  }
+  const invoke = await getTauriInvoke();
+  return invoke('remove_from_sync_blacklist', { fileHash }) as Promise<boolean>;
+}
+
+/** Clear all persisted sync blacklist hashes. */
+export async function clearSyncBlacklist(): Promise<boolean> {
+  if (isWeb) {
+    return fetchJson<boolean>('/sync/blacklist/all', { method: 'DELETE' });
+  }
+  const invoke = await getTauriInvoke();
+  return invoke('clear_sync_blacklist') as Promise<boolean>;
 }
 
 /**

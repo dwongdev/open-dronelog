@@ -355,6 +355,14 @@ impl Database {
                 manual_tags     VARCHAR,                 -- JSON array of manual tag strings
                 updated_at      TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             );
+
+            -- ============================================================
+            -- SYNC_BLACKLIST TABLE: File hashes excluded from sync import
+            -- ============================================================
+            CREATE TABLE IF NOT EXISTS sync_blacklist (
+                file_hash       VARCHAR PRIMARY KEY,
+                created_at      TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            );
             "#,
         )?;
 
@@ -2191,6 +2199,69 @@ impl Database {
         let hashes = stmt.query_map([], |row| row.get(0))?
             .collect::<Result<Vec<String>, _>>()?;
         Ok(hashes)
+    }
+
+    /// Add a file hash to sync blacklist (idempotent).
+    pub fn add_to_sync_blacklist(&self, file_hash: &str) -> Result<(), DatabaseError> {
+        let hash = file_hash.trim();
+        if hash.is_empty() {
+            return Ok(());
+        }
+
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT OR REPLACE INTO sync_blacklist (file_hash, created_at) VALUES (?, CURRENT_TIMESTAMP)",
+            params![hash],
+        )?;
+        Ok(())
+    }
+
+    /// Remove a file hash from sync blacklist.
+    pub fn remove_from_sync_blacklist(&self, file_hash: &str) -> Result<(), DatabaseError> {
+        let hash = file_hash.trim();
+        if hash.is_empty() {
+            return Ok(());
+        }
+
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM sync_blacklist WHERE file_hash = ?", params![hash])?;
+        Ok(())
+    }
+
+    /// Clear all sync blacklist entries.
+    pub fn clear_sync_blacklist(&self) -> Result<(), DatabaseError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM sync_blacklist", [])?;
+        Ok(())
+    }
+
+    /// Get all blacklisted file hashes.
+    pub fn get_sync_blacklist_hashes(&self) -> Result<Vec<String>, DatabaseError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT file_hash FROM sync_blacklist ORDER BY created_at DESC")?;
+        let hashes = stmt
+            .query_map([], |row| row.get(0))?
+            .collect::<Result<Vec<String>, _>>()?;
+        Ok(hashes)
+    }
+
+    /// Check whether a file hash is blacklisted.
+    #[allow(dead_code)]
+    pub fn is_sync_blacklisted(&self, file_hash: &str) -> Result<bool, DatabaseError> {
+        let hash = file_hash.trim();
+        if hash.is_empty() {
+            return Ok(false);
+        }
+
+        let conn = self.conn.lock().unwrap();
+        let exists: Option<i32> = conn
+            .query_row(
+                "SELECT 1 FROM sync_blacklist WHERE file_hash = ? LIMIT 1",
+                params![hash],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(exists.is_some())
     }
 
     /// Check if a duplicate flight exists based on exact signature match (drone_serial + battery_serial + start_time).

@@ -1257,6 +1257,29 @@ struct SyncFileResponse {
     file_hash: Option<String>,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SyncSingleFilePayload {
+    filename: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SyncBlacklistResponse {
+    hashes: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SyncBlacklistPayload {
+    file_hash: String,
+}
+
+#[derive(Deserialize)]
+struct RemoveSyncBlacklistParams {
+    file_hash: String,
+}
+
 /// GET /api/sync/config — Get the sync folder path configuration
 async fn get_sync_config() -> Json<SyncResponse> {
     let sync_path = std::env::var("SYNC_LOGS_PATH").ok();
@@ -1269,6 +1292,48 @@ async fn get_sync_config() -> Json<SyncResponse> {
         sync_path,
         auto_sync,
     })
+}
+
+/// GET /api/sync/blacklist — List blacklisted file hashes
+async fn get_sync_blacklist(
+    pdb: ProfileDb,
+) -> Result<Json<SyncBlacklistResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let hashes = pdb.db
+        .get_sync_blacklist_hashes()
+        .map_err(|e| err_response(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to get sync blacklist: {}", e)))?;
+    Ok(Json(SyncBlacklistResponse { hashes }))
+}
+
+/// POST /api/sync/blacklist — Add file hash to sync blacklist
+async fn add_sync_blacklist(
+    pdb: ProfileDb,
+    Json(payload): Json<SyncBlacklistPayload>,
+) -> Result<Json<bool>, (StatusCode, Json<ErrorResponse>)> {
+    pdb.db
+        .add_to_sync_blacklist(&payload.file_hash)
+        .map_err(|e| err_response(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to add sync blacklist hash: {}", e)))?;
+    Ok(Json(true))
+}
+
+/// DELETE /api/sync/blacklist?file_hash=... — Remove hash from sync blacklist
+async fn remove_sync_blacklist(
+    pdb: ProfileDb,
+    Query(params): Query<RemoveSyncBlacklistParams>,
+) -> Result<Json<bool>, (StatusCode, Json<ErrorResponse>)> {
+    pdb.db
+        .remove_from_sync_blacklist(&params.file_hash)
+        .map_err(|e| err_response(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to remove sync blacklist hash: {}", e)))?;
+    Ok(Json(true))
+}
+
+/// DELETE /api/sync/blacklist/all — Clear sync blacklist
+async fn clear_sync_blacklist(
+    pdb: ProfileDb,
+) -> Result<Json<bool>, (StatusCode, Json<ErrorResponse>)> {
+    pdb.db
+        .clear_sync_blacklist()
+        .map_err(|e| err_response(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to clear sync blacklist: {}", e)))?;
+    Ok(Json(true))
 }
 
 /// GET /api/sync/files — List all log files in the sync folder
@@ -1318,6 +1383,11 @@ async fn get_sync_files(
         .unwrap_or_default()
         .into_iter()
         .collect();
+    let blacklisted_hashes: std::collections::HashSet<String> = pdb.db
+        .get_sync_blacklist_hashes()
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
 
     let files: Vec<String> = entries
         .filter_map(|entry| entry.ok())
@@ -1334,7 +1404,7 @@ async fn get_sync_files(
             let path = entry.path();
             // Check if file is already imported by hash
             if let Ok(hash) = compute_file_hash(&path) {
-                if existing_hashes.contains(&hash) {
+                if existing_hashes.contains(&hash) || blacklisted_hashes.contains(&hash) {
                     return None; // Skip already imported files
                 }
             }
@@ -1353,11 +1423,12 @@ async fn get_sync_files(
 async fn sync_single_file(
     AxumState(_state): AxumState<WebAppState>,
     pdb: ProfileDb,
-    Json(payload): Json<serde_json::Value>,
+    Json(payload): Json<SyncSingleFilePayload>,
 ) -> Result<Json<SyncFileResponse>, (StatusCode, Json<ErrorResponse>)> {
-    let filename = payload.get("filename")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| err_response(StatusCode::BAD_REQUEST, "Missing filename".to_string()))?;
+    let filename = payload.filename.trim();
+    if filename.is_empty() {
+        return Err(err_response(StatusCode::BAD_REQUEST, "Missing filename".to_string()));
+    }
 
     let sync_dir = match pdb.sync_path() {
         Some(p) => p,
@@ -1387,6 +1458,18 @@ async fn sync_single_file(
         }));
     }
 
+    // Respect persistent DB-backed sync blacklist before any parse/import work.
+    let file_hash = compute_file_hash(&file_path).ok();
+    if let Some(hash) = file_hash.as_deref() {
+        if pdb.db.is_sync_blacklisted(hash).unwrap_or(false) {
+            return Ok(Json(SyncFileResponse {
+                success: false,
+                message: "Blacklisted (previously deleted)".to_string(),
+                file_hash: Some(hash.to_string()),
+            }));
+        }
+    }
+
     // Check smart tags setting
     let config_path = pdb.config_path();
     let config: serde_json::Value = if config_path.exists() {
@@ -1407,14 +1490,14 @@ async fn sync_single_file(
             return Ok(Json(SyncFileResponse {
                 success: false,
                 message: format!("Already imported (matches '{}')", matching_flight),
-                file_hash: None,
+                file_hash,
             }));
         }
         Err(e) => {
             return Ok(Json(SyncFileResponse {
                 success: false,
                 message: format!("Parse error: {}", e),
-                file_hash: None,
+                file_hash,
             }));
         }
     };
@@ -1609,6 +1692,13 @@ async fn sync_from_folder(
 
     for file_path in log_files {
         let file_name = file_path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+
+        if let Ok(hash) = compute_file_hash(&file_path) {
+            if pdb.db.is_sync_blacklisted(&hash).unwrap_or(false) {
+                skipped += 1;
+                continue;
+            }
+        }
         
         let parse_result = match parser.parse_log(&file_path).await {
             Ok(result) => result,
@@ -2194,6 +2284,8 @@ pub fn build_router(state: WebAppState) -> Router {
         .route("/api/backup", get(export_backup))
         .route("/api/backup/restore", post(import_backup))
         .route("/api/sync/config", get(get_sync_config))
+        .route("/api/sync/blacklist", get(get_sync_blacklist).post(add_sync_blacklist).delete(remove_sync_blacklist))
+        .route("/api/sync/blacklist/all", delete(clear_sync_blacklist))
         .route("/api/sync/files", get(get_sync_files))
         .route("/api/sync/file", post(sync_single_file))
         .route("/api/sync", post(sync_from_folder))
@@ -2395,6 +2487,13 @@ async fn run_scheduled_sync(state: &WebAppState) -> Result<(usize, usize, usize)
 
         for file_path in &log_files {
             let file_name = file_path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+
+            if let Ok(hash) = compute_file_hash(file_path) {
+                if db.is_sync_blacklisted(&hash).unwrap_or(false) {
+                    total_skipped += 1;
+                    continue;
+                }
+            }
 
             let parse_result = match parser.parse_log(file_path).await {
                 Ok(result) => result,

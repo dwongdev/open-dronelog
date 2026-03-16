@@ -1441,7 +1441,7 @@ export function FlightList({
 
         // Add to blacklist before deleting (so sync won't re-import)
         if (flight.fileHash) {
-          addToBlacklist(flight.fileHash);
+          await addToBlacklist(flight.fileHash);
         }
 
         await deleteFlight(flight.id);
@@ -3099,13 +3099,13 @@ export function FlightList({
                 <div className="flex items-center gap-2 mt-1 text-xs">
                   <span className="text-gray-400">{t('flightList.deleteConfirm')}</span>
                   <button
-                    onClick={(e) => {
+                    onClick={async (e) => {
                       e.stopPropagation();
                       // Add to blacklist before deleting (so sync won't re-import)
                       if (flight.fileHash) {
-                        addToBlacklist(flight.fileHash);
+                        await addToBlacklist(flight.fileHash);
                       }
-                      deleteFlight(flight.id);
+                      await deleteFlight(flight.id);
                       setConfirmDeleteId(null);
                     }}
                     className="text-red-400"

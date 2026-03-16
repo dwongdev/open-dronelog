@@ -14,13 +14,24 @@
 import { useCallback, useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useDropzone } from 'react-dropzone';
-import { isWebMode, pickFiles, computeFileHash, getFlights, getSyncConfig, getSyncFiles, syncSingleFile } from '@/lib/api';
+import {
+  isWebMode,
+  pickFiles,
+  computeFileHash,
+  getFlights,
+  getSyncConfig,
+  getSyncFiles,
+  syncSingleFile,
+  getSyncBlacklist,
+  addToSyncBlacklist,
+  removeFromSyncBlacklist,
+  clearSyncBlacklist,
+} from '@/lib/api';
 import { useFlightStore } from '@/stores/flightStore';
 import { ManualEntryModal } from './ManualEntryModal';
 
-// Storage keys for sync folder, blacklist, and autoscan
+// Storage keys for sync folder and autoscan
 const SYNC_FOLDER_KEY = 'syncFolderPath';
-const BLACKLIST_KEY = 'importBlacklist';
 const AUTOSCAN_KEY = 'autoscanEnabled';
 
 // Get autoscan enabled setting from localStorage
@@ -53,42 +64,42 @@ export function setSyncFolderPath(path: string | null): void {
 }
 
 // Get blacklisted file hashes (used when deleting flights)
-export function getBlacklist(): Set<string> {
-  if (typeof localStorage === 'undefined') return new Set();
+export async function getBlacklist(): Promise<Set<string>> {
   try {
-    const stored = localStorage.getItem(BLACKLIST_KEY);
-    return stored ? new Set(JSON.parse(stored)) : new Set();
+    const hashes = await getSyncBlacklist();
+    return new Set(hashes);
   } catch {
     return new Set();
   }
 }
 
 // Add hash to blacklist (called when deleting a flight)
-export function addToBlacklist(hash: string): void {
-  if (typeof localStorage === 'undefined' || !hash) return;
-  const blacklist = getBlacklist();
-  blacklist.add(hash);
-  localStorage.setItem(BLACKLIST_KEY, JSON.stringify([...blacklist]));
+export async function addToBlacklist(hash: string): Promise<void> {
+  if (!hash) return;
+  try {
+    await addToSyncBlacklist(hash);
+  } catch {
+    // Best-effort: deletion still proceeds even if blacklist write fails.
+  }
 }
 
 // Remove hash from blacklist (when manually importing)
-export function removeFromBlacklist(hash: string): void {
-  if (typeof localStorage === 'undefined' || !hash) return;
-  const blacklist = getBlacklist();
-  blacklist.delete(hash);
-  localStorage.setItem(BLACKLIST_KEY, JSON.stringify([...blacklist]));
+export async function removeFromBlacklist(hash: string): Promise<void> {
+  if (!hash) return;
+  try {
+    await removeFromSyncBlacklist(hash);
+  } catch {
+    // Best-effort: import still succeeds even if blacklist cleanup fails.
+  }
 }
 
 // Clear entire blacklist (e.g., when user wants to reset)
-export function clearBlacklist(): void {
-  if (typeof localStorage === 'undefined') return;
-  localStorage.removeItem(BLACKLIST_KEY);
-}
-
-// Check if a hash is blacklisted
-export function isBlacklisted(hash: string | null | undefined): boolean {
-  if (!hash) return false;
-  return getBlacklist().has(hash);
+export async function clearBlacklist(): Promise<void> {
+  try {
+    await clearSyncBlacklist();
+  } catch {
+    // Best-effort: caller controls UI messaging.
+  }
 }
 
 export function FlightImporter() {
@@ -163,7 +174,7 @@ export function FlightImporter() {
     };
 
     // Get blacklist for sync mode (check before import to avoid wasted work)
-    const blacklist = !isManualImport ? getBlacklist() : new Set<string>();
+    const blacklist = !isManualImport ? await getBlacklist() : new Set<string>();
     
     // Helper to check if file is blacklisted (for sync mode only)
     // Returns hash if blacklisted, null otherwise
@@ -225,7 +236,7 @@ export function FlightImporter() {
           processed += 1;
           // For manual import, remove from blacklist (allows re-importing)
           if (isManualImport && result.fileHash) {
-            removeFromBlacklist(result.fileHash);
+            await removeFromBlacklist(result.fileHash);
           }
           // Refresh flight list periodically so user sees progress
           if (processed % REFRESH_INTERVAL === 0) {
@@ -302,7 +313,7 @@ export function FlightImporter() {
           processed += 1;
           // For manual import, remove from blacklist (allows re-importing)
           if (isManualImport && result.fileHash) {
-            removeFromBlacklist(result.fileHash);
+            await removeFromBlacklist(result.fileHash);
           }
           // Refresh flight list in background while cooldown runs
           // This way user sees new flights appear during the wait
@@ -493,7 +504,6 @@ export function FlightImporter() {
           let processed = 0;
           let skipped = 0;
           let errors = 0;
-          
           for (let i = 0; i < filesResponse.files.length; i++) {
             if (backgroundSyncAbortRef.current) break;
             
@@ -510,7 +520,11 @@ export function FlightImporter() {
                   const { loadFlights, loadAllTags } = useFlightStore.getState();
                   loadFlights().then(() => loadAllTags());
                 }
-              } else if (result.message.toLowerCase().includes('already') || result.message.toLowerCase().includes('duplicate')) {
+              } else if (
+                result.message.toLowerCase().includes('already') ||
+                result.message.toLowerCase().includes('duplicate') ||
+                result.message.toLowerCase().includes('blacklisted')
+              ) {
                 skipped++;
               } else {
                 errors++;
@@ -603,7 +617,7 @@ export function FlightImporter() {
         // Get existing file hashes to check for new files
         const existingFlights = await getFlights();
         const existingHashes = new Set(existingFlights.map(f => f.fileHash).filter(Boolean));
-        const blacklist = getBlacklist();
+        const blacklist = await getBlacklist();
         
         // Find truly new files (not already imported, not blacklisted)
         const newFiles: string[] = [];
@@ -709,7 +723,6 @@ export function FlightImporter() {
         let processed = 0;
         let skipped = 0;
         let errors = 0;
-        
         for (let i = 0; i < filesResponse.files.length; i++) {
           const filename = filesResponse.files[i];
           setBatchIndex(i + 1);
@@ -724,7 +737,11 @@ export function FlightImporter() {
                 const { loadFlights, loadAllTags } = useFlightStore.getState();
                 loadFlights().then(() => loadAllTags());
               }
-            } else if (result.message.toLowerCase().includes('already') || result.message.toLowerCase().includes('duplicate')) {
+            } else if (
+              result.message.toLowerCase().includes('already') ||
+              result.message.toLowerCase().includes('duplicate') ||
+              result.message.toLowerCase().includes('blacklisted')
+            ) {
               skipped++;
             } else {
               errors++;

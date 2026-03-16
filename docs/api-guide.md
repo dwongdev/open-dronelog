@@ -266,6 +266,10 @@ These endpoints are only available in Docker/web deployment mode.
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/api/sync/config` | Get sync folder configuration. Returns `{ syncPath: string \| null }` |
+| GET | `/api/sync/blacklist` | Get persisted sync blacklist hashes for active profile. |
+| POST | `/api/sync/blacklist` | Add hash to sync blacklist. Body: `{ fileHash: string }` |
+| DELETE | `/api/sync/blacklist?file_hash=...` | Remove one hash from sync blacklist. |
+| DELETE | `/api/sync/blacklist/all` | Clear sync blacklist. |
 | GET | `/api/sync/files` | List files in sync folder that haven't been imported yet. |
 | POST | `/api/sync/file` | Import a single file from the sync folder. Body: `{ filename: string }` |
 | POST | `/api/sync` | Import all pending files from the sync folder. |

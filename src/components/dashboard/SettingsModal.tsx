@@ -137,18 +137,20 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   // Check if API key exists on mount
   useEffect(() => {
     if (isOpen) {
-      checkApiKey();
-      getAppLogDir();
-      loadSmartTagsEnabled();
-      fetchAppVersion();
-      setBlacklistCount(getBlacklist().size);
-      // Load enabled tag types from backend
-      api.loadEnabledSmartTagTypes().then(setEnabledTagTypes);
-      // Load keep upload settings (Tauri desktop only)
-      if (!isWebMode()) {
-        getKeepUploadSettings().then(setKeepUploadSettingsState);
-        api.getAutoLogout().then(setAutoLogout);
-      }
+      void (async () => {
+        checkApiKey();
+        getAppLogDir();
+        loadSmartTagsEnabled();
+        fetchAppVersion();
+        setBlacklistCount((await getBlacklist()).size);
+        // Load enabled tag types from backend
+        api.loadEnabledSmartTagTypes().then(setEnabledTagTypes);
+        // Load keep upload settings (Tauri desktop only)
+        if (!isWebMode()) {
+          getKeepUploadSettings().then(setKeepUploadSettingsState);
+          api.getAutoLogout().then(setAutoLogout);
+        }
+      })();
     }
   }, [isOpen]);
 
@@ -1376,8 +1378,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         </p>
                         <div className="mt-2 flex items-center gap-3">
                           <button
-                            onClick={() => {
-                              clearBlacklist();
+                            onClick={async () => {
+                              await clearBlacklist();
                               setBlacklistCount(0);
                               setConfirmClearBlacklist(false);
                               setMessage({ type: 'success', text: 'Blacklist cleared.' });

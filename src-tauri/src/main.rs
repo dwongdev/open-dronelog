@@ -560,6 +560,41 @@ mod tauri_app {
     }
 
     #[tauri::command]
+    pub async fn get_sync_blacklist(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+        state
+            .db_authenticated()?
+            .get_sync_blacklist_hashes()
+            .map_err(|e| format!("Failed to get sync blacklist: {}", e))
+    }
+
+    #[tauri::command]
+    pub async fn add_to_sync_blacklist(file_hash: String, state: State<'_, AppState>) -> Result<bool, String> {
+        state
+            .db_authenticated()?
+            .add_to_sync_blacklist(&file_hash)
+            .map(|_| true)
+            .map_err(|e| format!("Failed to add to sync blacklist: {}", e))
+    }
+
+    #[tauri::command]
+    pub async fn remove_from_sync_blacklist(file_hash: String, state: State<'_, AppState>) -> Result<bool, String> {
+        state
+            .db_authenticated()?
+            .remove_from_sync_blacklist(&file_hash)
+            .map(|_| true)
+            .map_err(|e| format!("Failed to remove from sync blacklist: {}", e))
+    }
+
+    #[tauri::command]
+    pub async fn clear_sync_blacklist(state: State<'_, AppState>) -> Result<bool, String> {
+        state
+            .db_authenticated()?
+            .clear_sync_blacklist()
+            .map(|_| true)
+            .map_err(|e| format!("Failed to clear sync blacklist: {}", e))
+    }
+
+    #[tauri::command]
     pub async fn get_flights(state: State<'_, AppState>) -> Result<Vec<Flight>, String> {
         let start = std::time::Instant::now();
         let flights = state
@@ -1585,6 +1620,10 @@ mod tauri_app {
                 import_log,
                 create_manual_flight,
                 compute_file_hash,
+                get_sync_blacklist,
+                add_to_sync_blacklist,
+                remove_from_sync_blacklist,
+                clear_sync_blacklist,
                 get_flights,
                 get_flight_data,
                 get_overview_stats,
