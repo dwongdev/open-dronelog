@@ -670,7 +670,8 @@ export function FlightMap({ track, homeLat, homeLon, durationSecs, telemetry, th
     const pitch = lerp(telemetry.pitch);
     const roll = lerp(telemetry.roll);
     const yaw = lerp(telemetry.yaw);
-    const rcSignal = telemetry.rcSignal?.[lo] ?? null;
+    const rcSignalRaw = telemetry.rcSignal?.[lo] ?? null;
+    const rcSignal = rcSignalRaw === 0 ? null : rcSignalRaw;
     const batteryVoltage = lerp(telemetry.batteryVoltage);
     const batteryTemp = lerp(telemetry.batteryTemp);
     const rcAileron = lerp(telemetry.rcAileron);
@@ -831,6 +832,7 @@ export function FlightMap({ track, homeLat, homeLon, durationSecs, telemetry, th
 
     // Pre-compute per-point values depending on colorBy mode
     let values: number[] | null = null;
+    let nullableValues: (number | null)[] | null = null;
     let minVal = 0;
     let maxVal = 1;
 
@@ -861,7 +863,26 @@ export function FlightMap({ track, homeLat, homeLon, durationSecs, telemetry, th
     };
 
     const batteryAtIndex = mapTelemetrySeriesToPath(telemetry?.battery);
-    const rcSignalAtIndex = mapTelemetrySeriesToPath(telemetry?.rcSignal);
+    const rcSignalAtIndex = mapTelemetrySeriesToPath(telemetry?.rcSignal).map((v) => (v === 0 ? null : v));
+    const rcSignalNearestAtIndex = [...rcSignalAtIndex];
+    let lastRcSignal: number | null = null;
+    for (let i = 0; i < rcSignalNearestAtIndex.length; i++) {
+      const value = rcSignalNearestAtIndex[i];
+      if (value !== null) {
+        lastRcSignal = value;
+      } else if (lastRcSignal !== null) {
+        rcSignalNearestAtIndex[i] = lastRcSignal;
+      }
+    }
+    let nextRcSignal: number | null = null;
+    for (let i = rcSignalNearestAtIndex.length - 1; i >= 0; i--) {
+      const value = rcSignalNearestAtIndex[i];
+      if (value !== null) {
+        nextRcSignal = value;
+      } else if (nextRcSignal !== null) {
+        rcSignalNearestAtIndex[i] = nextRcSignal;
+      }
+    }
     const satelliteCountAtIndex = mapTelemetrySeriesToPath(telemetry?.satellites);
 
     if (colorBy === 'height') {
@@ -903,8 +924,8 @@ export function FlightMap({ track, homeLat, homeLon, durationSecs, telemetry, th
       minVal = 0;
       maxVal = 100;
     } else if (colorBy === 'rcSignal') {
-      values = rcSignalAtIndex.map((v) => v ?? 0);
-      minVal = 0;
+      nullableValues = rcSignalNearestAtIndex;
+      minVal = 30;
       maxVal = 100;
     } else if (colorBy === 'satelliteCount') {
       values = satelliteCountAtIndex.map((v) => v ?? 3);
@@ -974,7 +995,11 @@ export function FlightMap({ track, homeLat, homeLon, durationSecs, telemetry, th
         const isRecording = isVideoAtIndex ? isVideoAtIndex[i] : false;
         color = isRecording ? COLOR_VIDEO_RECORDING : COLOR_VIDEO_NORMAL;
       } else {
-        const t = values ? (values[i] - minVal) / range : i / Math.max(1, n - 2);
+        const isRcSignalMode = colorBy === 'rcSignal';
+        const value = isRcSignalMode ? (nullableValues?.[i] ?? null) : (values?.[i] ?? null);
+        const t = value !== null
+          ? (value - minVal) / range
+          : (isRcSignalMode ? 0.5 : i / Math.max(1, n - 2));
         color = valueToColor(t, ramp);
       }
 

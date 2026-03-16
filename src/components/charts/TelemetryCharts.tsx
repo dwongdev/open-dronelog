@@ -149,6 +149,13 @@ function getFieldData(
     return rawData.map(v => (v === null || v === undefined || v === 0) ? null : v);
   }
 
+  // RC signal quality: treat 0 as unavailable/no sample for display.
+  if (fieldId === 'rcSignal' || fieldId === 'rcUplink' || fieldId === 'rcDownlink') {
+    const rawData = data[fieldId as ('rcSignal' | 'rcUplink' | 'rcDownlink')];
+    if (!rawData || !Array.isArray(rawData)) return [];
+    return rawData.map(v => (v === null || v === undefined || v === 0) ? null : v);
+  }
+
   const rawData = data[field.dataKey as keyof TelemetryData];
   if (!rawData || !Array.isArray(rawData)) return [];
 
@@ -248,9 +255,9 @@ function createDynamicChart(
   if (otherFields.length === 0 && cellVoltageSeries.length === 0) return null;
 
   // Combine all series
-  const allSeriesData: { label: string; data: (number | null)[]; color: string; unit: string }[] = [
-    ...regularSeriesData.map(s => ({ label: t(s.field.label), data: s.data, color: colorOverrides?.[s.field.id] || s.field.color, unit: s.unit })),
-    ...cellVoltageSeries,
+  const allSeriesData: { label: string; data: (number | null)[]; color: string; unit: string; fieldId: string | null }[] = [
+    ...regularSeriesData.map(s => ({ label: t(s.field.label), data: s.data, color: colorOverrides?.[s.field.id] || s.field.color, unit: s.unit, fieldId: s.field.id })),
+    ...cellVoltageSeries.map(s => ({ ...s, fieldId: null })),
   ];
 
   if (allSeriesData.length === 0) return null;
@@ -287,12 +294,14 @@ function createDynamicChart(
   const series: LineSeriesOption[] = allSeriesData.map((s, index) => {
     const unitKey = s.unit || '__no_unit__';
     const yAxisIndex = allSeriesData.length > 1 ? unitToAxisIndex.get(unitKey) ?? 0 : 0;
+    const connectRcNulls = s.fieldId === 'rcSignal' || s.fieldId === 'rcUplink' || s.fieldId === 'rcDownlink';
     return {
       name: s.label,
       type: 'line',
       data: s.data,
       yAxisIndex,
       smooth: true,
+      connectNulls: connectRcNulls,
       symbol: 'none',
       itemStyle: { color: s.color },
       lineStyle: { color: s.color, width: index === 0 ? 2 : 1.5 },
@@ -1954,8 +1963,12 @@ function createRcSignalChart(
   tooltipColors: TooltipColors,
   t: TFn
 ): EChartsOption {
-  const rcUplink = data.rcUplink ?? [];
-  const rcDownlink = data.rcDownlink ?? [];
+  const sanitizeRcSeries = (series?: (number | null)[]): (number | null)[] =>
+    (series ?? []).map((val) => (val === 0 ? null : val));
+
+  const rcSignal = sanitizeRcSeries(data.rcSignal);
+  const rcUplink = sanitizeRcSeries(data.rcUplink);
+  const rcDownlink = sanitizeRcSeries(data.rcDownlink);
   const hasUplink = rcUplink.some((val) => val !== null && val !== undefined);
   const hasDownlink = rcDownlink.some((val) => val !== null && val !== undefined);
   const showCombined = !hasUplink && !hasDownlink;
@@ -1965,8 +1978,9 @@ function createRcSignalChart(
         {
           name: t('telemetry.rcSignal'),
           type: 'line' as const,
-          data: data.rcSignal,
+          data: rcSignal,
           smooth: true,
+          connectNulls: true,
           symbol: 'none',
           itemStyle: {
             color: '#22c55e',
@@ -1983,6 +1997,7 @@ function createRcSignalChart(
           type: 'line' as const,
           data: rcUplink,
           smooth: true,
+          connectNulls: true,
           symbol: 'none',
           itemStyle: {
             color: '#22c55e',
@@ -1997,6 +2012,7 @@ function createRcSignalChart(
           type: 'line' as const,
           data: rcDownlink,
           smooth: true,
+          connectNulls: true,
           symbol: 'none',
           itemStyle: {
             color: '#38bdf8',
