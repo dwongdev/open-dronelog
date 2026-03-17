@@ -12,7 +12,7 @@ import { PasswordInput } from '@/components/ui/PasswordInput';
 import { getBlacklist, clearBlacklist } from './FlightImporter';
 import { SMART_TAG_TYPES, getEnabledSmartTagTypes, setEnabledSmartTagTypes, SmartTagTypeId } from '@/lib/api';
 import { FaDiscord, FaGithub, FaRedditAlien } from 'react-icons/fa';
-import { FiMail } from 'react-icons/fi';
+import { FiBookOpen, FiGlobe, FiMail } from 'react-icons/fi';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -1116,7 +1116,31 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
                     {t('settings.needHelp', 'Need Help?')}
                   </p>
-                  <div className="mt-2 grid grid-cols-2 gap-2">
+                  <div className="mt-2 grid grid-cols-3 gap-2">
+                    <a
+                      href="https://github.com/arpanghosh8453/open-dronelog/blob/main/docs/manual.md"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="group px-3 py-2 rounded-lg border border-gray-700 text-gray-200 bg-drone-dark/60 hover:bg-cyan-500/10 hover:border-cyan-500/50 focus:outline-none focus:ring-2 focus:ring-cyan-500/40 transition-all text-sm font-medium flex items-center justify-center gap-2 no-underline"
+                    >
+                      <span className="inline-flex items-center justify-center w-5 h-5 rounded-md bg-cyan-500/15 text-cyan-400 group-hover:bg-cyan-500/20 transition-colors">
+                        <FiBookOpen className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                      </span>
+                      {t('settings.docs', 'Docs')}
+                    </a>
+
+                    <a
+                      href="https://opendronelog.com"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="group px-3 py-2 rounded-lg border border-gray-700 text-gray-200 bg-drone-dark/60 hover:bg-emerald-500/10 hover:border-emerald-500/50 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 transition-all text-sm font-medium flex items-center justify-center gap-2 no-underline"
+                    >
+                      <span className="inline-flex items-center justify-center w-5 h-5 rounded-md bg-emerald-500/15 text-emerald-400 group-hover:bg-emerald-500/20 transition-colors">
+                        <FiGlobe className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                      </span>
+                      {t('settings.website', 'Website')}
+                    </a>
+
                     <a
                       href="https://opendronelog.com/#about"
                       target="_blank"
@@ -1138,7 +1162,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       <span className="inline-flex items-center justify-center w-5 h-5 rounded-md bg-rose-500/15 text-rose-400 group-hover:bg-rose-500/20 transition-colors">
                         <FaGithub className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
                       </span>
-                      {t('settings.reportBug', 'Report Bug')}
+                      {t('settings.reportBug', 'Issues')}
                     </a>
 
                     <a
