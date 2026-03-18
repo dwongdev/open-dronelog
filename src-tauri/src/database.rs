@@ -1200,9 +1200,45 @@ impl Database {
 
         let max_points = max_points.unwrap();
 
+        // Guard against invalid API input that would cause divide-by-zero in downsampling.
+        if max_points == 0 {
+            log::warn!(
+                "max_points=0 for flight {}, returning raw telemetry instead",
+                flight_id
+            );
+            return self.query_raw_telemetry(&conn, flight_id);
+        }
+
         // Use known count or fall back to a COUNT query
         let point_count = match known_point_count {
-            Some(c) if c > 0 => c,
+            Some(c) if c > 0 => {
+                // When a flight is expected to be downsampled, verify persisted metadata against
+                // actual telemetry rows. This avoids NULL MIN/MAX aggregates when metadata is stale.
+                if c as usize > max_points {
+                    let actual: i64 = conn.query_row(
+                        "SELECT COUNT(*) FROM telemetry WHERE flight_id = ?",
+                        params![flight_id],
+                        |row| row.get(0),
+                    )?;
+
+                    if actual != c {
+                        log::warn!(
+                            "Telemetry point count mismatch for flight {}: metadata={}, actual={}",
+                            flight_id,
+                            c,
+                            actual
+                        );
+                    }
+
+                    if actual == 0 {
+                        return Ok(Vec::new());
+                    }
+
+                    actual
+                } else {
+                    c
+                }
+            }
             _ => {
                 let c: i64 = conn.query_row(
                     "SELECT COUNT(*) FROM telemetry WHERE flight_id = ?",
@@ -1341,11 +1377,22 @@ impl Database {
         target_points: usize,
     ) -> Result<Vec<TelemetryRecord>, DatabaseError> {
         // Calculate the bucket size in milliseconds based on flight duration and target points
-        let (min_ts, max_ts): (i64, i64) = conn.query_row(
+        let (min_ts, max_ts): (Option<i64>, Option<i64>) = conn.query_row(
             "SELECT MIN(timestamp_ms), MAX(timestamp_ms) FROM telemetry WHERE flight_id = ?",
             params![flight_id],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
+
+        let (min_ts, max_ts) = match (min_ts, max_ts) {
+            (Some(min_ts), Some(max_ts)) => (min_ts, max_ts),
+            _ => {
+                log::warn!(
+                    "No telemetry rows found while downsampling flight {}. Returning empty result.",
+                    flight_id
+                );
+                return Ok(Vec::new());
+            }
+        };
 
         let duration_ms = max_ts - min_ts;
         let bucket_size_ms = (duration_ms / target_points as i64).max(1000); // At least 1 second
