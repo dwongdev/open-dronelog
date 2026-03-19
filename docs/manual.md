@@ -1134,7 +1134,6 @@ xattr -d com.apple.quarantine /path/to/Drone\ Logbook.app
 If you need any help, want to discuss features, or report issues, join our community platforms:
 
 - **Discord**: [Join our server](https://discord.gg/YKgKTmSm7B)
-- **Reddit**: [r/opendronelog](https://www.reddit.com/r/opendronelog/)
 
 ---
 

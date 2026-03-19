@@ -514,8 +514,8 @@ Check out the [Open Drone Log telemetry overlay poject](https://github.com/arpan
         <img src="https://img.shields.io/badge/Discord-Join%20Server-5865F2?style=for-the-badge&logo=discord" alt="Discord" height="48"/>
     </a>
     &nbsp;&nbsp;
-    <a href="https://www.reddit.com/r/opendronelog/">
-        <img src="https://img.shields.io/badge/Reddit-r%2Fopendronelog-FF4500?style=for-the-badge&logo=reddit" alt="Reddit" height="48"/>
+    <a href="https://opendronelog.com/#about">
+        <img src="https://img.shields.io/badge/Contact-Get%20in%20Touch-0EA5E9?style=for-the-badge" alt="Contact" height="48"/>
     </a>
 </p>
 

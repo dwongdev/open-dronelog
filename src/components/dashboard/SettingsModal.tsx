@@ -11,7 +11,7 @@ import { Select } from '@/components/ui/Select';
 import { PasswordInput } from '@/components/ui/PasswordInput';
 import { getBlacklist, clearBlacklist } from './FlightImporter';
 import { SMART_TAG_TYPES, getEnabledSmartTagTypes, setEnabledSmartTagTypes, SmartTagTypeId } from '@/lib/api';
-import { FaDiscord, FaGithub, FaRedditAlien } from 'react-icons/fa';
+import { FaComments, FaDiscord, FaGithub } from 'react-icons/fa';
 import { FiBookOpen, FiGlobe, FiMail } from 'react-icons/fi';
 
 interface SettingsModalProps {
@@ -1166,15 +1166,15 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     </a>
 
                     <a
-                      href="https://www.reddit.com/r/opendronelog"
+                      href="https://github.com/arpanghosh8453/open-dronelog/discussions"
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="group px-3 py-2 rounded-lg border border-gray-700 text-gray-200 bg-drone-dark/60 hover:bg-orange-500/10 hover:border-orange-500/50 focus:outline-none focus:ring-2 focus:ring-orange-500/40 transition-all text-sm font-medium flex items-center justify-center gap-2 no-underline"
+                      className="group px-3 py-2 rounded-lg border border-gray-700 text-gray-200 bg-drone-dark/60 hover:bg-amber-500/10 hover:border-amber-500/50 focus:outline-none focus:ring-2 focus:ring-amber-500/40 transition-all text-sm font-medium flex items-center justify-center gap-2 no-underline"
                     >
-                      <span className="inline-flex items-center justify-center w-5 h-5 rounded-md bg-orange-500/15 text-orange-400 group-hover:bg-orange-500/20 transition-colors">
-                        <FaRedditAlien className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                      <span className="inline-flex items-center justify-center w-5 h-5 rounded-md bg-amber-500/15 text-amber-400 group-hover:bg-amber-500/20 transition-colors">
+                        <FaComments className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
                       </span>
-                      {t('settings.reddit', 'Reddit')}
+                      {t('settings.discussion', 'Discussion')}
                     </a>
 
                     <a
