@@ -159,6 +159,9 @@ export function buildCsv(data: FlightDataResponse, unitPrefs?: UnitPreferences):
     'pitch_deg',
     'roll_deg',
     'yaw_deg',
+    'gimbal_pitch_deg',
+    'gimbal_roll_deg',
+    'gimbal_yaw_deg',
     'rc_aileron',
     'rc_elevator',
     'rc_throttle',
@@ -193,6 +196,7 @@ export function buildCsv(data: FlightDataResponse, unitPrefs?: UnitPreferences):
       '', // satellites
       '', '', '', // rc_signal, rc_uplink, rc_downlink
       '', '', '', // pitch, roll, yaw
+      '', '', '', // gimbal_pitch, gimbal_roll, gimbal_yaw
       '', '', '', '', // rc controls
       '', '', '', // is_photo, is_video, flight_mode
       '', '', // battery_full_capacity_mah, battery_remained_capacity_mah
@@ -289,6 +293,9 @@ export function buildCsv(data: FlightDataResponse, unitPrefs?: UnitPreferences):
       getMetric(telemetry.pitch, index, 2),          // pitch_deg
       getMetric(telemetry.roll, index, 2),           // roll_deg
       getMetric(telemetry.yaw, index, 2),            // yaw_deg
+      getMetric(telemetry.gimbalPitch, index, 2),    // gimbal_pitch_deg
+      getMetric(telemetry.gimbalRoll, index, 2),     // gimbal_roll_deg
+      getMetric(telemetry.gimbalYaw, index, 2),      // gimbal_yaw_deg
       getMetric(telemetry.rcAileron, index, 1),      // rc_aileron
       getMetric(telemetry.rcElevator, index, 1),     // rc_elevator
       getMetric(telemetry.rcThrottle, index, 1),     // rc_throttle

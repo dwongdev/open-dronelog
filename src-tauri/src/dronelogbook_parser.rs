@@ -536,10 +536,10 @@ impl<'a> DroneLogbookParser<'a> {
                 roll: col_map.get_f64(fields, "roll_deg"),
                 yaw: col_map.get_f64(fields, "yaw_deg"),
 
-                // Gimbal (not in our CSV export currently)
-                gimbal_pitch: None,
-                gimbal_roll: None,
-                gimbal_yaw: None,
+                // Gimbal
+                gimbal_pitch: col_map.get_f64(fields, "gimbal_pitch_deg"),
+                gimbal_roll: col_map.get_f64(fields, "gimbal_roll_deg"),
+                gimbal_yaw: col_map.get_f64(fields, "gimbal_yaw_deg"),
 
                 // Power
                 battery_percent: col_map.get_i32(fields, "battery_percent"),

@@ -37,7 +37,7 @@ interface TelemetryFieldDef {
   /** Conversion factor for imperial (applied to raw m/s values) */
   imperialFactor?: number;
   /** Group this field belongs to for organization */
-  group: 'altitude' | 'speed' | 'battery' | 'attitude' | 'rc' | 'gps' | 'velocity';
+  group: 'altitude' | 'speed' | 'battery' | 'attitude' | 'gimbal' | 'rc' | 'gps' | 'velocity';
 }
 
 /** All available telemetry fields that can be plotted */
@@ -62,6 +62,11 @@ const TELEMETRY_FIELDS: TelemetryFieldDef[] = [
   { id: 'pitch', label: 'telemetry.pitch', color: '#8b5cf6', dataKey: 'pitch', unit: '°', group: 'attitude' },
   { id: 'roll', label: 'telemetry.roll', color: '#ec4899', dataKey: 'roll', unit: '°', group: 'attitude' },
   { id: 'yaw', label: 'telemetry.yaw', color: '#14b8a6', dataKey: 'yaw', unit: '°', group: 'attitude' },
+
+  // Gimbal group
+  { id: 'gimbalPitch', label: 'telemetry.gimbalPitch', color: '#f97316', dataKey: 'gimbalPitch', unit: '°', group: 'gimbal' },
+  { id: 'gimbalRoll', label: 'telemetry.gimbalRoll', color: '#10b981', dataKey: 'gimbalRoll', unit: '°', group: 'gimbal' },
+  { id: 'gimbalYaw', label: 'telemetry.gimbalYaw', color: '#06b6d4', dataKey: 'gimbalYaw', unit: '°', group: 'gimbal' },
 
   // RC group
   { id: 'rcSignal', label: 'telemetry.rcSignal', color: '#22c55e', dataKey: 'rcSignal', unit: '%', group: 'rc' },
@@ -385,6 +390,7 @@ interface TelemetryChartsConfig {
   battery: ChartPanelConfig;
   cellVoltage: ChartPanelConfig;
   attitude: ChartPanelConfig;
+  gimbal: ChartPanelConfig;
   rcSignal: ChartPanelConfig;
   distanceToHome: ChartPanelConfig;
   velocity: ChartPanelConfig;
@@ -398,6 +404,7 @@ const DEFAULT_CHART_CONFIGS: TelemetryChartsConfig = {
   battery: { title: null, selectedFields: ['battery', 'batteryTemp'] },
   cellVoltage: { title: null, selectedFields: ['allCellVoltages', 'batteryVoltage'] },
   attitude: { title: null, selectedFields: ['pitch', 'roll', 'yaw'] },
+  gimbal: { title: null, selectedFields: ['gimbalPitch', 'gimbalRoll', 'gimbalYaw'] },
   rcSignal: { title: null, selectedFields: ['rcSignal'] }, // Will be overridden if uplink/downlink available
   distanceToHome: { title: null, selectedFields: ['distanceToHome'] },
   velocity: { title: null, selectedFields: ['velocityX', 'velocityY', 'velocityZ'] },
@@ -407,7 +414,7 @@ const DEFAULT_CHART_CONFIGS: TelemetryChartsConfig = {
 
 const CHART_CONFIG_STORAGE_KEY = 'telemetryChartConfigs';
 /** Bump this version to force a one-time reset of saved configs to new defaults */
-const CHART_CONFIG_VERSION = 2;
+const CHART_CONFIG_VERSION = 3;
 const CHART_CONFIG_VERSION_KEY = 'telemetryChartConfigsVersion';
 
 /** Load chart configurations from localStorage */
@@ -980,6 +987,26 @@ export function TelemetryCharts({ data, unitPrefs, startTime }: TelemetryChartsP
     [data, splitLineColor, tooltipColors, tooltipFormatter, unitPrefs, chartConfigs.rcSignal, t, telemetryColors]
   );
 
+  const gimbalOption = useMemo(
+    () => {
+      const config = chartConfigs.gimbal;
+      if (config.selectedFields.length > 0) {
+        return createDynamicChart(
+          config.selectedFields,
+          data,
+          unitPrefs,
+          splitLineColor,
+          tooltipFormatter,
+          tooltipColors,
+          t,
+          telemetryColors
+        );
+      }
+      return createGimbalChart(data, splitLineColor, tooltipFormatter, tooltipColors, t);
+    },
+    [data, splitLineColor, tooltipColors, tooltipFormatter, unitPrefs, chartConfigs.gimbal, t, telemetryColors]
+  );
+
   const distanceToHomeOption = useMemo(
     () => {
       const config = chartConfigs.distanceToHome;
@@ -1219,6 +1246,29 @@ export function TelemetryCharts({ data, unitPrefs, startTime }: TelemetryChartsP
         <div className={`h-64${mapSyncEnabled ? ' pointer-events-none' : ''}`}>
           <ReactECharts
             option={attitudeOption}
+            style={{ height: '100%', width: '100%' }}
+            opts={{ renderer: 'canvas' }}
+            notMerge={true}
+            onChartReady={registerChart}
+          />
+        </div>
+      </div>
+
+      {/* Gimbal Chart */}
+      <div>
+        <ChartHeader
+          config={chartConfigs.gimbal}
+          availableFields={TELEMETRY_FIELDS}
+          onFieldsChange={(fields) => updateChartConfig('gimbal', { selectedFields: fields })}
+          unitPrefs={unitPrefs}
+          theme={resolvedTheme}
+          getFieldColor={getFieldColor}
+          onFieldColorChange={setTelemetryColor}
+          onFieldColorReset={resetTelemetryColor}
+        />
+        <div className={`h-64${mapSyncEnabled ? ' pointer-events-none' : ''}`}>
+          <ReactECharts
+            option={gimbalOption}
             style={{ height: '100%', width: '100%' }}
             opts={{ renderer: 'canvas' }}
             notMerge={true}
@@ -1949,6 +1999,107 @@ function createAttitudeChart(
         },
         lineStyle: {
           color: '#14b8a6',
+          width: 1.5,
+        },
+      },
+    ],
+  };
+}
+
+function createGimbalChart(
+  data: TelemetryData,
+  splitLineColor: string,
+  tooltipFormatter: TooltipFormatter,
+  tooltipColors: TooltipColors,
+  t: TFn
+): EChartsOption {
+  const gimbalPitch = data.gimbalPitch ?? [];
+  const gimbalRoll = data.gimbalRoll ?? [];
+  const gimbalYaw = data.gimbalYaw ?? [];
+  const gimbalRange = computeRange([
+    ...gimbalPitch,
+    ...gimbalRoll,
+    ...gimbalYaw,
+  ]);
+
+  return {
+    ...baseChartConfig,
+    tooltip: {
+      ...baseChartConfig.tooltip,
+      backgroundColor: tooltipColors.background,
+      borderColor: tooltipColors.border,
+      textStyle: { color: tooltipColors.text },
+      formatter: tooltipFormatter,
+    },
+    legend: {
+      ...baseChartConfig.legend,
+      data: [t('telemetry.gimbalPitch'), t('telemetry.gimbalRoll'), t('telemetry.gimbalYaw')],
+    },
+    xAxis: {
+      ...createTimeAxis(data.time),
+    },
+    yAxis: {
+      type: 'value',
+      name: t('telemetry.gimbalRotations'),
+      nameTextStyle: {
+        color: '#f97316',
+      },
+      min: gimbalRange.min,
+      max: gimbalRange.max,
+      axisLine: {
+        lineStyle: {
+          color: '#f97316',
+        },
+      },
+      axisLabel: {
+        color: '#9ca3af',
+      },
+      splitLine: {
+        lineStyle: {
+          color: splitLineColor,
+        },
+      },
+    },
+    series: [
+      {
+        name: t('telemetry.gimbalPitch'),
+        type: 'line',
+        data: gimbalPitch,
+        smooth: true,
+        symbol: 'none',
+        itemStyle: {
+          color: '#f97316',
+        },
+        lineStyle: {
+          color: '#f97316',
+          width: 1.5,
+        },
+      },
+      {
+        name: t('telemetry.gimbalRoll'),
+        type: 'line',
+        data: gimbalRoll,
+        smooth: true,
+        symbol: 'none',
+        itemStyle: {
+          color: '#10b981',
+        },
+        lineStyle: {
+          color: '#10b981',
+          width: 1.5,
+        },
+      },
+      {
+        name: t('telemetry.gimbalYaw'),
+        type: 'line',
+        data: gimbalYaw,
+        smooth: true,
+        symbol: 'none',
+        itemStyle: {
+          color: '#06b6d4',
+        },
+        lineStyle: {
+          color: '#06b6d4',
           width: 1.5,
         },
       },

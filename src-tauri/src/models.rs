@@ -158,6 +158,9 @@ pub struct TelemetryRecord {
     pub pitch: Option<f64>,
     pub roll: Option<f64>,
     pub yaw: Option<f64>,
+    pub gimbal_pitch: Option<f64>,
+    pub gimbal_roll: Option<f64>,
+    pub gimbal_yaw: Option<f64>,
     pub satellites: Option<i32>,
     pub flight_mode: Option<String>,
     pub rc_signal: Option<i32>,
@@ -324,6 +327,12 @@ pub struct TelemetryData {
     pub roll: Vec<Option<f64>>,
     /// Yaw/Heading
     pub yaw: Vec<Option<f64>>,
+    /// Gimbal pitch angle
+    pub gimbal_pitch: Vec<Option<f64>>,
+    /// Gimbal roll angle
+    pub gimbal_roll: Vec<Option<f64>>,
+    /// Gimbal yaw/heading
+    pub gimbal_yaw: Vec<Option<f64>>,
     /// RC aileron stick input (normalized -100..+100)
     pub rc_aileron: Vec<Option<f64>>,
     /// RC elevator stick input (normalized -100..+100)
@@ -373,6 +382,9 @@ impl TelemetryData {
         let mut pitch = Vec::with_capacity(n);
         let mut roll = Vec::with_capacity(n);
         let mut yaw = Vec::with_capacity(n);
+        let mut gimbal_pitch = Vec::with_capacity(n);
+        let mut gimbal_roll = Vec::with_capacity(n);
+        let mut gimbal_yaw = Vec::with_capacity(n);
         let mut rc_aileron = Vec::with_capacity(n);
         let mut rc_elevator = Vec::with_capacity(n);
         let mut rc_throttle = Vec::with_capacity(n);
@@ -406,6 +418,9 @@ impl TelemetryData {
             pitch.push(r.pitch);
             roll.push(r.roll);
             yaw.push(r.yaw);
+            gimbal_pitch.push(r.gimbal_pitch);
+            gimbal_roll.push(r.gimbal_roll);
+            gimbal_yaw.push(r.gimbal_yaw);
             rc_aileron.push(r.rc_aileron);
             rc_elevator.push(r.rc_elevator);
             rc_throttle.push(r.rc_throttle);
@@ -440,6 +455,9 @@ impl TelemetryData {
             pitch,
             roll,
             yaw,
+            gimbal_pitch,
+            gimbal_roll,
+            gimbal_yaw,
             rc_aileron,
             rc_elevator,
             rc_throttle,

@@ -262,6 +262,8 @@ impl<'a> LitchiParser<'a> {
 
     /// Parse a single CSV row into a TelemetryPoint
     fn parse_row(&self, col_map: &ColumnMap, row: &[&str], battery_full_capacity: Option<f64>) -> TelemetryPoint {
+        let get_any_f64 = |fields: &[&str]| fields.iter().find_map(|f| col_map.get_f64(row, f));
+
         // Parse timestamp - prefer time(millisecond) as relative ms from flight start
         // If time column exists, use it (with 0 for empty values)
         // Otherwise use datetime as epoch ms (will be normalized later)
@@ -303,9 +305,15 @@ impl<'a> LitchiParser<'a> {
             yaw: col_map.get_f64(row, "yaw"),
 
             // Gimbal - Raw values are in tenths of degrees, converted columns are already in degrees
-            gimbal_pitch: col_map.get_f64(row, "gimbalPitchRaw").map(|v| v / 10.0).or(col_map.get_f64(row, "gimbalPitch")),
-            gimbal_roll: col_map.get_f64(row, "gimbalRollRaw").map(|v| v / 10.0).or(col_map.get_f64(row, "gimbalRoll")),
-            gimbal_yaw: col_map.get_f64(row, "gimbalYawRaw").map(|v| v / 10.0).or(col_map.get_f64(row, "gimbalYaw")),
+            gimbal_pitch: get_any_f64(&["gimbalPitchRaw", "gimbal_pitch_raw"])
+                .map(|v| v / 10.0)
+                .or_else(|| get_any_f64(&["gimbalPitch", "gimbal_pitch"])),
+            gimbal_roll: get_any_f64(&["gimbalRollRaw", "gimbal_roll_raw"])
+                .map(|v| v / 10.0)
+                .or_else(|| get_any_f64(&["gimbalRoll", "gimbal_roll"])),
+            gimbal_yaw: get_any_f64(&["gimbalYawRaw", "gimbal_yaw_raw"])
+                .map(|v| v / 10.0)
+                .or_else(|| get_any_f64(&["gimbalYaw", "gimbal_yaw"])),
 
             // Power
             battery_percent: col_map.get_i32(row, "remainPowerPercent"),

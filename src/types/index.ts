@@ -62,6 +62,9 @@ export interface TelemetryData {
   pitch: (number | null)[];
   roll: (number | null)[];
   yaw: (number | null)[];
+  gimbalPitch?: (number | null)[];
+  gimbalRoll?: (number | null)[];
+  gimbalYaw?: (number | null)[];
   rcAileron?: (number | null)[];
   rcElevator?: (number | null)[];
   rcThrottle?: (number | null)[];

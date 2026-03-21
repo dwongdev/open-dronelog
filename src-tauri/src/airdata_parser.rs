@@ -402,6 +402,8 @@ impl<'a> AirdataParser<'a> {
     // ------------------------------------------------------------------
 
     fn parse_row(col_map: &ColumnMap, row: &[&str]) -> TelemetryPoint {
+        let get_any_f64_raw = |fields: &[&str]| fields.iter().find_map(|f| col_map.get_f64_raw(row, f));
+
         // Timestamp: use time(millisecond) column directly (no unit conversion)
         let timestamp_ms = col_map
             .get_f64_raw(row, "time")
@@ -486,9 +488,16 @@ impl<'a> AirdataParser<'a> {
                 .or_else(|| col_map.get_f64_raw(row, " compass_heading")),
 
             // Gimbal
-            gimbal_pitch: col_map.get_f64_raw(row, "gimbal_pitch"),
-            gimbal_roll: col_map.get_f64_raw(row, "gimbal_roll"),
-            gimbal_yaw: col_map.get_f64_raw(row, "gimbal_heading"),
+            gimbal_pitch: get_any_f64_raw(&["gimbal_pitch", " gimbal_pitch", "gimbal pitch", "gimbalpitch"]),
+            gimbal_roll: get_any_f64_raw(&["gimbal_roll", " gimbal_roll", "gimbal roll", "gimbalroll"]),
+            gimbal_yaw: get_any_f64_raw(&[
+                "gimbal_heading",
+                " gimbal_heading",
+                "gimbal_yaw",
+                " gimbal_yaw",
+                "gimbal yaw",
+                "gimbalyaw",
+            ]),
 
             // Power
             battery_percent: col_map.get_i32(row, "battery_percent"),
