@@ -21,7 +21,7 @@ import { type MapType, MAP_TYPE_OPTIONS, getMapStyle } from '@/lib/mapStyles';
 // ---------------------------------------------------------------------------
 
 /** Cluster circles — size & color scale with point count */
-const clusterLayer: maplibregl.LayerSpecification = {
+const clusterLayer = {
   id: 'clusters',
   type: 'circle',
   source: 'flights',
@@ -52,7 +52,7 @@ const clusterLayer: maplibregl.LayerSpecification = {
 };
 
 /** Cluster count labels */
-const clusterCountLayer: maplibregl.LayerSpecification = {
+const clusterCountLayer = {
   id: 'cluster-count',
   type: 'symbol',
   source: 'flights',
@@ -74,7 +74,7 @@ const clusterCountLayer: maplibregl.LayerSpecification = {
 };
 
 /** Unclustered single-flight points */
-const unclusteredPointLayer: maplibregl.LayerSpecification = {
+const unclusteredPointLayer = {
   id: 'unclustered-point',
   type: 'circle',
   source: 'flights',
@@ -88,7 +88,7 @@ const unclusteredPointLayer: maplibregl.LayerSpecification = {
 };
 
 /** Heatmap layer rendering flight density */
-const heatmapLayer: maplibregl.LayerSpecification = {
+const heatmapLayer = {
   id: 'flights-heat',
   type: 'heatmap',
   source: 'flights',
@@ -112,7 +112,7 @@ const heatmapLayer: maplibregl.LayerSpecification = {
       0, 1,
       14, 3
     ],
-    // Color ramp from transparent to blue to yellow to red
+    // Color ramp from transparent to green to yellow to red
     'heatmap-color': [
       'interpolate',
       ['linear'],
@@ -129,18 +129,94 @@ const heatmapLayer: maplibregl.LayerSpecification = {
       'interpolate',
       ['linear'],
       ['zoom'],
-      0, 10,
-      14, 30
+      0, 11,
+      14, 33
     ],
     // Transition from heatmap to circle layer by zoom level
     'heatmap-opacity': [
       'interpolate',
       ['linear'],
       ['zoom'],
-      7, 1,
-      14, 0.5
+      9, 0.85,
+      11.5, 0.45,
+      12.8, 0.2,
+      13.8, 0.04,
     ],
   }
+};
+
+/** High-zoom marker glow for heatmap mode when points are no longer clearly visible */
+const heatmapPointGlowLayer = {
+  id: 'heatmap-point-glow',
+  type: 'circle',
+  source: 'flights',
+  minzoom: 10,
+  paint: {
+    'circle-color': '#eaff3b',
+    'circle-radius': [
+      'interpolate',
+      ['linear'],
+      ['zoom'],
+      12, 5,
+      16, 7,
+      18, 9,
+    ],
+    'circle-opacity': [
+      'interpolate',
+      ['linear'],
+      ['zoom'],
+      12, 0.42,
+      16, 0.5,
+      18, 0.58,
+    ],
+    'circle-blur': 0.9,
+    'circle-stroke-width': 0,
+  },
+};
+
+/** High-zoom neon center dot for heatmap mode */
+const heatmapPointCenterLayer = {
+  id: 'heatmap-point-center',
+  type: 'circle',
+  source: 'flights',
+  minzoom: 10,
+  paint: {
+    'circle-color': '#f4ff57',
+    'circle-radius': [
+      'interpolate',
+      ['linear'],
+      ['zoom'],
+      10, 2,
+      11, 2.4,
+      14, 4.8,
+      18, 4.8,
+    ],
+    'circle-stroke-width': 0.8,
+    'circle-stroke-color': 'rgba(255, 255, 210, 0.95)',
+    'circle-opacity': 1,
+  },
+};
+
+/** Extra bright core so point remains obvious on noisy satellite imagery */
+const heatmapPointCoreLayer = {
+  id: 'heatmap-point-core',
+  type: 'circle',
+  source: 'flights',
+  minzoom: 10,
+  paint: {
+    'circle-color': '#ffffcc',
+    'circle-radius': [
+      'interpolate',
+      ['linear'],
+      ['zoom'],
+      10, 0.6,
+      11, 0.72,
+      14, 1.44,
+      18, 1.44,
+    ],
+    'circle-opacity': 0.95,
+    'circle-stroke-width': 0,
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -316,6 +392,14 @@ export function FlightClusterMap({
     () => getMapStyle(mapType, resolvedTheme),
     [mapType, resolvedTheme],
   );
+
+  const interactiveLayerIds = useMemo(() => {
+    const ids = ['clusters', 'unclustered-point'];
+    if (showHeatmap) {
+      ids.push('heatmap-point-center');
+    }
+    return ids;
+  }, [showHeatmap]);
 
   // Update visible bounds when map moves (only if filter is enabled)
   const updateBounds = useCallback(() => {
@@ -525,13 +609,31 @@ export function FlightClusterMap({
 
       // Check unclustered points
       const pointFeatures = map.queryRenderedFeatures(e.point, {
-        layers: ['unclustered-point'],
+        layers: ['unclustered-point', 'heatmap-point-center'],
       });
       if (pointFeatures.length > 0) {
         const feature = pointFeatures[0];
         const geom = feature.geometry as GeoJSON.Point;
         const props = feature.properties;
         if (props) {
+          // When clicking heatmap center over a clustered feature, zoom in.
+          const clusterId = props.cluster_id;
+          if (clusterId != null) {
+            const source = map.getSource('flights') as any;
+            if (source) {
+              Promise.resolve(source.getClusterExpansionZoom(clusterId))
+                .then((zoom: number) => {
+                  map.easeTo({
+                    center: geom.coordinates as [number, number],
+                    zoom: Math.min(zoom, 18),
+                    duration: 500,
+                  });
+                })
+                .catch(() => { });
+            }
+            return;
+          }
+
           // GeoJSON properties are serialized as strings by MapLibre
           const flightId = typeof props.id === 'string' ? parseInt(props.id, 10) : props.id;
           const flight = flights.find((f) => f.id === flightId);
@@ -595,7 +697,7 @@ export function FlightClusterMap({
           ref={mapRef}
           initialViewState={viewport}
           style={{ width: '100%', height: '100%' }}
-          mapStyle={activeMapStyle}
+          mapStyle={activeMapStyle as any}
           attributionControl={false}
           cooperativeGestures={true}
           onMove={(evt) => {
@@ -609,7 +711,7 @@ export function FlightClusterMap({
           }}
           onLoad={updateBounds}
           onClick={handleClick}
-          interactiveLayerIds={['clusters', 'unclustered-point']}
+          interactiveLayerIds={interactiveLayerIds}
           onMouseEnter={handleMouseEnter}
           onMouseLeave={handleMouseLeave}
         >
@@ -682,10 +784,13 @@ export function FlightClusterMap({
             clusterMaxZoom={14}
             clusterRadius={50}
           >
-            {showHeatmap && <Layer {...heatmapLayer} />}
-            {showClusters && <Layer {...clusterLayer} />}
-            {showClusters && <Layer {...clusterCountLayer} />}
-            {showClusters && <Layer {...unclusteredPointLayer} />}
+            {showHeatmap && <Layer {...(heatmapLayer as any)} />}
+            {showClusters && <Layer {...(clusterLayer as any)} />}
+            {showClusters && <Layer {...(clusterCountLayer as any)} />}
+            {showClusters && <Layer {...(unclusteredPointLayer as any)} />}
+            {showHeatmap && <Layer {...(heatmapPointGlowLayer as any)} />}
+            {showHeatmap && <Layer {...(heatmapPointCenterLayer as any)} />}
+            {showHeatmap && <Layer {...(heatmapPointCoreLayer as any)} />}
           </Source>
 
           {/* Highlighted flight marker (shown above other markers) */}
