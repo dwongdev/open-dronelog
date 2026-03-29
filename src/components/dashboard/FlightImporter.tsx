@@ -39,6 +39,23 @@ const SYNC_FOLDER_KEY = 'syncFolderPath';
 const AUTOSCAN_KEY = 'autoscanEnabled';
 const MOBILE_SYNC_URI_KEY = 'mobileSyncFolderUri';
 const DEFAULT_ALLOWED_EXTENSIONS = ['txt', 'dat', 'log', 'csv'];
+const STARTUP_SYNC_GUARD_PREFIX = 'startupSyncDone:';
+
+// Guard startup auto-sync across component remounts within the same app session.
+// Keyed by profile so each profile can auto-sync once per app startup.
+const startupAutoSyncProfilesTriggered = new Set<string>();
+
+function hasStartupSyncTriggered(profileKey: string): boolean {
+  if (startupAutoSyncProfilesTriggered.has(profileKey)) return true;
+  if (typeof sessionStorage === 'undefined') return false;
+  return sessionStorage.getItem(`${STARTUP_SYNC_GUARD_PREFIX}${profileKey}`) === '1';
+}
+
+function markStartupSyncTriggered(profileKey: string): void {
+  startupAutoSyncProfilesTriggered.add(profileKey);
+  if (typeof sessionStorage === 'undefined') return;
+  sessionStorage.setItem(`${STARTUP_SYNC_GUARD_PREFIX}${profileKey}`, '1');
+}
 
 type AndroidFsUri = {
   uri: string;
@@ -917,127 +934,19 @@ export function FlightImporter() {
       trackTimer(retryTimer);
     };
 
-    // Only run once
-    if (backgroundSyncTriggeredRef.current) return;
-    
-    // Web mode: check if SYNC_LOGS_PATH is configured on server
-    if (isWebMode()) {
-      backgroundSyncTriggeredRef.current = true;
-      backgroundSyncAbortRef.current = false;
-      
-      const runWebStartupSync = async () => {
-        logImporterEvent('Auto-scan on startup started (web mode).');
-        setIsBackgroundSyncing(true);
-        setBackgroundSyncResult(null);
-        
-        try {
-          // Check if sync is configured on server
-          if (backgroundSyncAbortRef.current) {
-            setIsBackgroundSyncing(false);
-            return;
-          }
-          
-          const config = await getSyncConfig();
-          if (!config.syncPath || !config.autoSync) {
-            // No sync folder configured or scheduled sync not enabled - manual sync only
-            setIsBackgroundSyncing(false);
-            return;
-          }
-          
-          if (backgroundSyncAbortRef.current) {
-            setIsBackgroundSyncing(false);
-            return;
-          }
-          
-          // Get list of files to sync
-          const filesResponse = await getSyncFiles();
-          if (filesResponse.files.length === 0) {
-            setIsBackgroundSyncing(false);
-            return;
-          }
-          
-          // Process files one by one with progress tracking
-          setIsBackgroundSyncing(false); // Switch to batch processing mode
-          setIsBatchProcessing(true);
-          setBatchTotal(filesResponse.files.length);
-          setBatchIndex(0);
-          
-          let processed = 0;
-          let skipped = 0;
-          let errors = 0;
-          for (let i = 0; i < filesResponse.files.length; i++) {
-            if (backgroundSyncAbortRef.current) break;
-            
-            const filename = filesResponse.files[i];
-            setBatchIndex(i + 1);
-            setCurrentFileName(filename.length > 50 ? `${filename.slice(0, 50)}…` : filename);
-            
-            try {
-              const result = await syncSingleFile(filename);
-              if (result.success) {
-                processed++;
-                // Refresh flight list every 2 files to show progress
-                if (processed % 2 === 0) {
-                  const { loadFlights, loadAllTags } = useFlightStore.getState();
-                  loadFlights().then(() => loadAllTags());
-                }
-              } else if (
-                result.message.toLowerCase().includes('already') ||
-                result.message.toLowerCase().includes('duplicate') ||
-                result.message.toLowerCase().includes('blacklisted')
-              ) {
-                skipped++;
-              } else {
-                errors++;
-              }
-            } catch (e) {
-              console.error(`Failed to sync ${filename}:`, e);
-              errors++;
-            }
-          }
-          
-          setIsBatchProcessing(false);
-          setCurrentFileName(null);
-          setBatchTotal(0);
-          setBatchIndex(0);
-          
-          // Final refresh
-          if (processed > 0) {
-            const { loadFlights, loadAllTags } = useFlightStore.getState();
-            await loadFlights();
-            loadAllTags();
-          }
-          
-          // Show result message
-          if (processed > 0 || skipped > 0 || errors > 0) {
-            const parts: string[] = [];
-            if (processed > 0) parts.push(`${processed} imported`);
-            if (skipped > 0) parts.push(`${skipped} skipped`);
-            if (errors > 0) parts.push(`${errors} errors`);
-            setBatchMessage(t('importer.syncComplete', { parts: parts.join(', ') }));
-          }
-        } catch (e) {
-          console.error('Background sync check failed:', e);
-          setIsBackgroundSyncing(false);
-          setIsBatchProcessing(false);
-        }
-      };
+    const profileKey = (activeProfile || 'default').trim() || 'default';
 
-      // Lazy load: wait before startup autosync to not block initial render
-      const timeoutId = window.setTimeout(() => {
-        void scheduleBusyRetry(0, async () => {
-          await runWebStartupSync();
-        });
-      }, STARTUP_DELAY_MS);
-      trackTimer(timeoutId);
-      
-      return () => {
-        for (const timerId of startupTimersRef.current) {
-          clearTimeout(timerId);
-        }
-        startupTimersRef.current = [];
-      };
+    // Only run once per profile per app session, even if importer remounts.
+    if (hasStartupSyncTriggered(profileKey) || backgroundSyncTriggeredRef.current) return;
+
+    // Web mode relies on server-side cron scheduling only.
+    if (isWebMode()) {
+      markStartupSyncTriggered(profileKey);
+      backgroundSyncTriggeredRef.current = true;
+      return;
     }
+
+    markStartupSyncTriggered(profileKey);
     
     if (isMobileRuntime && !isWebMode()) {
       if (!getAutoscanEnabled()) return;
@@ -1215,7 +1124,7 @@ export function FlightImporter() {
       }
       startupTimersRef.current = [];
     };
-  }, [isMobileRuntime, loadFilesFromSavedMobileDirectory]);
+  }, [activeProfile, isMobileRuntime, loadFilesFromSavedMobileDirectory]);
 
   const isDragActive = webDragActive || tauriDragActive;
 
