@@ -78,19 +78,23 @@ jobs:
       - name: Initialize Android project
         run: npm run mobile:android:init
 
-      - name: Build release universal APK
-        id: build_universal_apk
+      - name: Sync Android launcher icons
+        run: npm run mobile:android:sync-icons
+
+      - name: Build release APKs (universal and split)
+        id: build_apks
         run: |
           set -euo pipefail
           LOG_PATH="$RUNNER_TEMP/android-build.log"
           echo "build_log=$LOG_PATH" >> "$GITHUB_OUTPUT"
           npm run mobile:android:build:release 2>&1 | tee "$LOG_PATH"
+          npm run mobile:android:build:release:apk:split 2>&1 | tee -a "$LOG_PATH"
 
       - name: Summarize Android build warnings
         if: always()
         run: |
           set -euo pipefail
-          LOG_PATH="${{ steps.build_universal_apk.outputs.build_log }}"
+          LOG_PATH="${{ steps.build_apks.outputs.build_log }}"
           if [ -z "$LOG_PATH" ] || [ ! -f "$LOG_PATH" ]; then
             echo "No Android build log found to summarize."
             exit 0
@@ -145,8 +149,8 @@ jobs:
           echo "$BUILD_TOOLS_DIR" >> "$GITHUB_PATH"
           "$BUILD_TOOLS_DIR/apksigner" --version >/dev/null
 
-      - name: Sign release universal APK
-        id: sign_apk
+      - name: Sign release APKs (universal and split)
+        id: sign_apks
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
@@ -163,7 +167,7 @@ jobs:
           KEY_PASSWORD="${ANDROID_KEY_PASSWORD:-$ANDROID_KEYSTORE_PASSWORD}"
           TAG="${{ needs.resolve-tag.outputs.tag }}"
           KEYSTORE_PATH="$RUNNER_TEMP/upload-keystore.jks"
-          SIGNED_DIR="$RUNNER_TEMP/signed-apk"
+          SIGNED_DIR="$RUNNER_TEMP/signed-apks"
           APK_OUTPUT_DIR="src-tauri/gen/android/app/build/outputs/apk"
 
           ZIPALIGN_BIN=$(command -v zipalign || true)
@@ -182,53 +186,50 @@ jobs:
           mkdir -p "$SIGNED_DIR"
           echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
 
-          mapfile -t UNIVERSAL_UNSIGNED_APKS < <(find "$APK_OUTPUT_DIR" -type f -name '*universal*release-unsigned.apk' | sort)
+          mapfile -t UNSIGNED_APKS < <(find "$APK_OUTPUT_DIR" -type f -name '*-unsigned.apk' | sort)
 
-          if [ "${#UNIVERSAL_UNSIGNED_APKS[@]}" -eq 0 ]; then
-            mapfile -t UNIVERSAL_UNSIGNED_APKS < <(find "$APK_OUTPUT_DIR" -type f -name '*universal*-unsigned.apk' | sort)
-          fi
-
-          if [ "${#UNIVERSAL_UNSIGNED_APKS[@]}" -eq 0 ]; then
-            mapfile -t UNIVERSAL_UNSIGNED_APKS < <(find "$APK_OUTPUT_DIR" -type f -name '*-unsigned.apk' | sort)
-          fi
-
-          if [ "${#UNIVERSAL_UNSIGNED_APKS[@]}" -eq 0 ]; then
+          if [ "${#UNSIGNED_APKS[@]}" -eq 0 ]; then
             echo "No unsigned APKs were found in $APK_OUTPUT_DIR"
             exit 1
           fi
 
-          if [ "${#UNIVERSAL_UNSIGNED_APKS[@]}" -gt 1 ]; then
-            echo "Expected a single universal unsigned APK, found ${#UNIVERSAL_UNSIGNED_APKS[@]}"
-            printf '%s\n' "${UNIVERSAL_UNSIGNED_APKS[@]}"
-            exit 1
-          fi
+          for UNSIGNED_APK in "${UNSIGNED_APKS[@]}"; do
+            BASE_NAME=$(basename "$UNSIGNED_APK")
+            APK_VARIANT=$(echo "$UNSIGNED_APK" | sed -E 's#.*?/apk/([^/]+)/.*#\1#')
+            if [ "$APK_VARIANT" = "$UNSIGNED_APK" ]; then
+              APK_VARIANT="unknown"
+            fi
+            ALIGNED_APK="$RUNNER_TEMP/aligned-${BASE_NAME/-unsigned.apk/.apk}"
 
-          UNSIGNED_APK="${UNIVERSAL_UNSIGNED_APKS[0]}"
-          BASE_NAME=$(basename "$UNSIGNED_APK")
-          ALIGNED_APK="$RUNNER_TEMP/aligned-${BASE_NAME/-unsigned.apk/.apk}"
-          OUTPUT_NAME="open-dronelog_${TAG}_android-universal.apk"
-          OUTPUT_APK="$SIGNED_DIR/$OUTPUT_NAME"
+            if [[ "$BASE_NAME" == *universal* ]] || [[ "$APK_VARIANT" == universal ]]; then
+              OUTPUT_NAME="open-dronelog_${TAG}_android-universal.apk"
+            else
+              OUTPUT_NAME="open-dronelog_${TAG}_${APK_VARIANT}_android.apk"
+            fi
 
-          "$ZIPALIGN_BIN" -p -f 4 "$UNSIGNED_APK" "$ALIGNED_APK"
+            OUTPUT_APK="$SIGNED_DIR/$OUTPUT_NAME"
 
-          "$APKSIGNER_BIN" sign \
-            --ks "$KEYSTORE_PATH" \
-            --ks-key-alias "$ANDROID_KEY_ALIAS" \
-            --ks-pass "pass:$ANDROID_KEYSTORE_PASSWORD" \
-            --key-pass "pass:$KEY_PASSWORD" \
-            --out "$OUTPUT_APK" \
-            "$ALIGNED_APK"
+            "$ZIPALIGN_BIN" -p -f 4 "$UNSIGNED_APK" "$ALIGNED_APK"
 
-          "$APKSIGNER_BIN" verify --verbose "$OUTPUT_APK"
+            "$APKSIGNER_BIN" sign \
+              --ks "$KEYSTORE_PATH" \
+              --ks-key-alias "$ANDROID_KEY_ALIAS" \
+              --ks-pass "pass:$ANDROID_KEYSTORE_PASSWORD" \
+              --key-pass "pass:$KEY_PASSWORD" \
+              --out "$OUTPUT_APK" \
+              "$ALIGNED_APK"
 
-          echo "signed_apk=$OUTPUT_APK" >> "$GITHUB_OUTPUT"
+            "$APKSIGNER_BIN" verify --verbose "$OUTPUT_APK"
+          done
 
-      - name: Upload signed universal APK artifact
+          echo "signed_dir=$SIGNED_DIR" >> "$GITHUB_OUTPUT"
+
+      - name: Upload signed APK artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: android-apk-release-universal-signed
+          name: android-apk-release-all-signed
           path: |
-            ${{ steps.sign_apk.outputs.signed_apk }}
+            ${{ steps.sign_apks.outputs.signed_dir }}/*.apk
 
       - name: Ensure release exists for tag
         env:
@@ -247,7 +248,7 @@ jobs:
               --notes "Automated Android release assets for $TAG"
           fi
 
-      - name: Upload signed universal APK to release assets
+      - name: Upload signed APKs to release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.resolve-tag.outputs.tag }}
@@ -255,7 +256,7 @@ jobs:
           set -euo pipefail
 
           gh release upload "$TAG" \
-            "${{ steps.sign_apk.outputs.signed_apk }}" \
+            "${{ steps.sign_apks.outputs.signed_dir }}"/*.apk \
             --repo "${{ github.repository }}" \
             --clobber
 
