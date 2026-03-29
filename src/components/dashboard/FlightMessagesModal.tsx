@@ -73,7 +73,7 @@ export function FlightMessagesModal({
   const tipCount = sorted.filter((m) => m.messageType === 'tip').length;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-hidden">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-hidden mobile-safe-container">
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/60 backdrop-blur-sm"
@@ -84,7 +84,7 @@ export function FlightMessagesModal({
       {/* Modal panel */}
       <div
         ref={modalRef}
-        className="flight-messages-modal relative z-10 w-full max-w-lg bg-drone-dark border border-gray-700 rounded-2xl shadow-2xl flex flex-col max-h-[80vh]"
+        className="flight-messages-modal relative z-10 w-full max-w-lg bg-drone-dark border border-gray-700 rounded-2xl shadow-2xl flex flex-col max-h-[80vh] modal-mobile-max"
         role="dialog"
         aria-modal="true"
         aria-label={t('map.messages')}

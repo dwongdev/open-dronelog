@@ -1,5 +1,5 @@
 {
-  "sourceFingerprint": "748db6f3ac650a391478b6dbda2e99fbe5b3ac8a71c8d65f3130a9aff841c534",
+  "sourceFingerprint": "f37b01c0c655144b905fcf2c0a3702c28608562bf233239634a59e2f86a6b6f6",
   "packageName": "open-dronelog",
   "projectVersion": "2.33.0",
   "dependencies": [
@@ -10,6 +10,7 @@
     "@tauri-apps/plugin-dialog",
     "@tauri-apps/plugin-fs",
     "@tauri-apps/plugin-log",
+    "@tauri-apps/plugin-opener",
     "@tauri-apps/plugin-shell",
     "deck.gl",
     "echarts",
@@ -26,6 +27,7 @@
     "react-i18next",
     "react-icons",
     "react-map-gl",
+    "tauri-plugin-android-fs-api",
     "zustand"
   ],
   "devDependencies": [

@@ -140,7 +140,7 @@ export function HtmlReportModal({ isOpen, onClose, onGenerate, flightCount }: Ht
             onClick={onClose}
         >
             <div
-                className="bg-drone-secondary border border-gray-700 rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col"
+                className="bg-drone-secondary border border-gray-700 rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col modal-mobile-max"
                 style={{ maxHeight: '85vh' }}
                 onClick={(e) => e.stopPropagation()}
             >

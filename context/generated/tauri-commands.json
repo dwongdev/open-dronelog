@@ -1,5 +1,5 @@
 {
-  "sourceFingerprint": "5b57dc0e8ac3b0f30a03e846a9c276591062b01fc68d6935949bab6367fbf481",
+  "sourceFingerprint": "6053fa6101940b0f51218999adcacd96ca093dd846cd61668a9a0496d5c409e8",
   "sourceFile": "src/lib/api.ts",
   "commands": [
     "add_flight_tag",
@@ -35,6 +35,7 @@
     "has_api_key",
     "import_backup",
     "import_log",
+    "import_log_bytes",
     "is_app_locked",
     "list_profiles",
     "log_sync_event",

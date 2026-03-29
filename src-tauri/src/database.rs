@@ -11,6 +11,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
+use chrono::{Duration, NaiveDate, Utc};
 use duckdb::{params, Connection, OptionalExt, Result as DuckResult};
 use thiserror::Error;
 
@@ -73,7 +74,7 @@ impl Database {
         let conn = Self::open_with_recovery(&db_path)?;
 
         // Configure DuckDB for optimal performance
-        Self::configure_connection(&conn)?;
+        Self::configure_connection(&conn, &app_data_dir)?;
 
         // Checkpoint WAL to main database file for faster subsequent startups
         if let Err(e) = conn.execute_batch("CHECKPOINT;") {
@@ -166,7 +167,7 @@ impl Database {
     }
 
     /// Configure DuckDB connection for optimal analytical performance
-    fn configure_connection(conn: &Connection) -> DuckResult<()> {
+    fn configure_connection(conn: &Connection, app_data_dir: &PathBuf) -> DuckResult<()> {
         // Memory settings for better performance with large datasets
         conn.execute_batch(
             r#"
@@ -176,6 +177,24 @@ impl Database {
             PRAGMA wal_autocheckpoint='25MB';
             "#,
         )?;
+
+        // Android uses a sandboxed filesystem. Setting a writable DuckDB home directory
+        // prevents extension/runtime code paths from probing invalid default locations.
+        let escaped_home = app_data_dir.to_string_lossy().replace('\'', "''");
+        let home_sql = format!("SET home_directory='{}';", escaped_home);
+        if let Err(e) = conn.execute_batch(&home_sql) {
+            log::warn!("Failed to set DuckDB home_directory (non-fatal): {}", e);
+        }
+
+        // Best-effort toggles: on some builds these settings are unavailable.
+        for stmt in [
+            "SET autoinstall_known_extensions=false;",
+            "SET autoload_known_extensions=false;",
+        ] {
+            if let Err(e) = conn.execute_batch(stmt) {
+                log::debug!("DuckDB setting not applied '{}': {}", stmt.trim_end_matches(';'), e);
+            }
+        }
         Ok(())
     }
 
@@ -1646,28 +1665,42 @@ impl Database {
             })?
             .collect::<Result<Vec<_>, _>>()?;
 
-        // Flights by date for activity heatmap (last 365 days)
+        // Flights by date for activity heatmap (last 365 days).
+        // Grouping in Rust avoids DATE_TRUNC/TZ function paths that can require ICU.
         let mut stmt = conn.prepare(
             r#"
-            SELECT 
-                CAST(DATE_TRUNC('day', start_time) AS DATE)::VARCHAR AS flight_date,
-                COUNT(*)::BIGINT AS count
+            SELECT CAST(start_time AS VARCHAR) AS start_time
             FROM flights
-            WHERE start_time IS NOT NULL 
-              AND start_time >= CURRENT_DATE - INTERVAL '365 days'
-            GROUP BY DATE_TRUNC('day', start_time)
-            ORDER BY flight_date ASC
+            WHERE start_time IS NOT NULL
             "#,
         )?;
 
-        let flights_by_date = stmt
-            .query_map([], |row| {
-                Ok(FlightDateCount {
-                    date: row.get(0)?,
-                    count: row.get(1)?,
-                })
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
+        let cutoff_date = Utc::now().date_naive() - Duration::days(365);
+        let mut date_counts: std::collections::BTreeMap<String, i64> = std::collections::BTreeMap::new();
+
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        for row in rows {
+            let ts = row?;
+            if ts.len() < 10 {
+                continue;
+            }
+
+            let date_part = &ts[..10];
+            let Ok(parsed_date) = NaiveDate::parse_from_str(date_part, "%Y-%m-%d") else {
+                continue;
+            };
+
+            if parsed_date < cutoff_date {
+                continue;
+            }
+
+            *date_counts.entry(date_part.to_string()).or_insert(0) += 1;
+        }
+
+        let flights_by_date = date_counts
+            .into_iter()
+            .map(|(date, count)| FlightDateCount { date, count })
+            .collect::<Vec<_>>();
 
         // Top 3 longest flights
         let mut stmt = conn.prepare(

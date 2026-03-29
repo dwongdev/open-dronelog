@@ -196,7 +196,17 @@ export async function importLog(
     return response.json();
   }
   const invoke = await getTauriInvoke();
-  return invoke('import_log', { filePath: fileOrPath as string }) as Promise<ImportResult>;
+  if (typeof fileOrPath === 'string') {
+    return invoke('import_log', { filePath: fileOrPath }) as Promise<ImportResult>;
+  }
+
+  // Android file pickers return File objects from content URIs, not stable filesystem paths.
+  // Send raw bytes to the backend so import works regardless of URI scheme.
+  const bytes = Array.from(new Uint8Array(await fileOrPath.arrayBuffer()));
+  return invoke('import_log_bytes', {
+    fileName: fileOrPath.name,
+    fileBytes: bytes,
+  }) as Promise<ImportResult>;
 }
 
 /**

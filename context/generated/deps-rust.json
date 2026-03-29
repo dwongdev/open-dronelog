@@ -1,5 +1,5 @@
 {
-  "sourceFingerprint": "c2e1a04dcafb5539f2c0cbd147a1d67c6c48cb0be73b0709936497f3d346dbb0",
+  "sourceFingerprint": "e6299bd31c108ff50395f7fbf6d02a80228874cf9dccc3529af386f9ae0426e1",
   "crate": "open-dronelog",
   "dependencies": [
     "anyhow",
@@ -21,10 +21,13 @@
     "sha2",
     "tar",
     "tauri",
+    "tauri-plugin-android-fs",
     "tauri-plugin-dialog",
     "tauri-plugin-fs",
     "tauri-plugin-http",
     "tauri-plugin-log",
+    "tauri-plugin-opener",
+    "tauri-plugin-persisted-scope",
     "tauri-plugin-shell",
     "tauri-plugin-single-instance",
     "tauri-plugin-window-state",

@@ -31,11 +31,97 @@ import {
 } from '@/lib/api';
 import { useFlightStore } from '@/stores/flightStore';
 import { ManualEntryModal } from './ManualEntryModal';
+import { useIsMobileRuntime } from '@/hooks/platform/useIsMobileRuntime';
 
 // Storage keys for sync folder and autoscan
 const SYNC_FOLDER_KEY = 'syncFolderPath';
 const AUTOSCAN_KEY = 'autoscanEnabled';
+const MOBILE_SYNC_URI_KEY = 'mobileSyncFolderUri';
 const DEFAULT_ALLOWED_EXTENSIONS = ['txt', 'dat', 'log', 'csv'];
+
+type AndroidFsUri = {
+  uri: string;
+  documentTopTreeUri: string | null;
+};
+
+type AndroidFsEntry = {
+  type: 'Dir' | 'File';
+  name: string;
+  uri: AndroidFsUri;
+  mimeType?: string;
+};
+
+type AndroidFsModule = {
+  AndroidFs: {
+    showOpenDirPicker: (options?: { localOnly?: boolean }) => Promise<AndroidFsUri | null>;
+    persistPickerUriPermission: (uri: AndroidFsUri) => Promise<void>;
+    checkPersistedPickerUriPermission: (uri: AndroidFsUri, state: string) => Promise<boolean>;
+    readDir: (uri: AndroidFsUri, options?: { offset?: number; limit?: number }) => Promise<AndroidFsEntry[]>;
+    readFile: (uri: AndroidFsUri) => Promise<Uint8Array>;
+  };
+  AndroidUriPermissionState: {
+    ReadOrWrite: string;
+  };
+  isAndroid: () => boolean;
+};
+
+function decodeFileUri(pathOrUri: string): string {
+  try {
+    if (pathOrUri.startsWith('file://')) {
+      return decodeURIComponent(new URL(pathOrUri).pathname);
+    }
+  } catch {
+    // Ignore parse errors and return raw value.
+  }
+  return pathOrUri;
+}
+
+export function normalizeSyncFolderPath(pathOrUri: string): string {
+  const raw = decodeFileUri(pathOrUri.trim());
+  if (raw.startsWith('content://')) {
+    return raw;
+  }
+  if (raw.length <= 1) return raw;
+  return raw.replace(/[\\/]+$/, '');
+}
+
+function isSyncFolderReadable(pathOrUri: string | null): boolean {
+  return Boolean(pathOrUri);
+}
+
+function getMobileSyncFolderUri(): AndroidFsUri | null {
+  if (typeof localStorage === 'undefined') return null;
+  const raw = localStorage.getItem(MOBILE_SYNC_URI_KEY);
+  if (!raw) return null;
+
+  try {
+    const parsed = JSON.parse(raw) as AndroidFsUri;
+    if (!parsed?.uri || typeof parsed.uri !== 'string') return null;
+    return {
+      uri: parsed.uri,
+      documentTopTreeUri:
+        parsed.documentTopTreeUri === null || typeof parsed.documentTopTreeUri === 'string'
+          ? parsed.documentTopTreeUri
+          : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function setMobileSyncFolderUri(uri: AndroidFsUri | null): void {
+  if (typeof localStorage === 'undefined') return;
+  if (!uri) {
+    localStorage.removeItem(MOBILE_SYNC_URI_KEY);
+    return;
+  }
+  localStorage.setItem(MOBILE_SYNC_URI_KEY, JSON.stringify(uri));
+}
+
+function joinFolderPath(folderPath: string, fileName: string): string {
+  const trimmed = folderPath.replace(/[\\/]+$/, '');
+  return `${trimmed}/${fileName}`;
+}
 
 function normalizeExtension(ext: string): string {
   return ext.trim().replace(/^\./, '').toLowerCase();
@@ -45,6 +131,68 @@ function hasAllowedExtension(fileName: string, allowed: Set<string>): boolean {
   const dotIndex = fileName.lastIndexOf('.');
   if (dotIndex < 0 || dotIndex === fileName.length - 1) return false;
   return allowed.has(normalizeExtension(fileName.slice(dotIndex + 1)));
+}
+
+async function pickFolderFiles(accept?: string): Promise<File[]> {
+  return new Promise((resolve) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.multiple = true;
+    if (accept) input.accept = accept;
+
+    // Prefer folder selection where supported (webkit-based engines on Android).
+    const folderInput = input as HTMLInputElement & {
+      webkitdirectory?: boolean;
+      directory?: boolean;
+    };
+    folderInput.webkitdirectory = true;
+    folderInput.directory = true;
+
+    input.onchange = () => {
+      const files = Array.from(input.files || []);
+      resolve(files);
+    };
+    input.addEventListener('cancel', () => resolve([]));
+    input.click();
+  });
+}
+
+async function loadAndroidFsModule(): Promise<AndroidFsModule | null> {
+  try {
+    const mod = await import('tauri-plugin-android-fs-api');
+    return mod as unknown as AndroidFsModule;
+  } catch {
+    return null;
+  }
+}
+
+async function listFilesFromAndroidUri(
+  androidFs: AndroidFsModule['AndroidFs'],
+  dirUri: AndroidFsUri,
+  allowed: Set<string>,
+): Promise<File[]> {
+  const files: File[] = [];
+
+  const walk = async (uri: AndroidFsUri) => {
+    const entries = await androidFs.readDir(uri);
+    for (const entry of entries) {
+      if (entry.type === 'Dir') {
+        await walk(entry.uri);
+        continue;
+      }
+
+      if (entry.type === 'File' && hasAllowedExtension(entry.name, allowed)) {
+        const content = await androidFs.readFile(entry.uri);
+        const bytes = content instanceof Uint8Array ? content : new Uint8Array(content);
+        const normalizedBytes = new Uint8Array(bytes.byteLength);
+        normalizedBytes.set(bytes);
+        files.push(new File([normalizedBytes], entry.name, { type: entry.mimeType || 'application/octet-stream' }));
+      }
+    }
+  };
+
+  await walk(dirUri);
+  return files;
 }
 
 // Get autoscan enabled setting from localStorage
@@ -70,9 +218,10 @@ export function getSyncFolderPath(): string | null {
 export function setSyncFolderPath(path: string | null): void {
   if (typeof localStorage === 'undefined') return;
   if (path) {
-    localStorage.setItem(SYNC_FOLDER_KEY, path);
+    localStorage.setItem(SYNC_FOLDER_KEY, normalizeSyncFolderPath(path));
   } else {
     localStorage.removeItem(SYNC_FOLDER_KEY);
+    localStorage.removeItem(MOBILE_SYNC_URI_KEY);
   }
 }
 
@@ -117,6 +266,7 @@ export async function clearBlacklist(): Promise<void> {
 
 export function FlightImporter() {
   const { t } = useTranslation();
+  const isMobileRuntime = useIsMobileRuntime();
   const { importLog, isImporting, apiKeyType, loadApiKeyType, isBatchProcessing, setIsBatchProcessing, activeProfile } = useFlightStore();
   const [batchMessage, setBatchMessage] = useState<string | null>(null);
   const [cooldownRemaining, setCooldownRemaining] = useState(0);
@@ -140,6 +290,7 @@ export function FlightImporter() {
     isSyncing: false,
   });
   const startupTimersRef = useRef<number[]>([]);
+  const mobileSyncFilesRef = useRef<File[]>([]);
   const allowedExtensionSet = useMemo(
     () => new Set(allowedExtensions.map(normalizeExtension)),
     [allowedExtensions]
@@ -305,6 +456,18 @@ export function FlightImporter() {
         return null;
       }
     };
+
+    const finalizeCancelledBatch = () => {
+      setIsBatchProcessing(false);
+      setCurrentFileName(null);
+      setBatchTotal(0);
+      setBatchIndex(0);
+      setCooldownRemaining(0);
+      setBatchMessage('Import canceled.');
+      logImporterEvent('Batch processing canceled by user.', {
+        mode: isManualImport ? 'manual-import' : 'sync-import',
+      });
+    };
     
     if (hasPersonalKey) {
       // Optimized path: batch import without cooldown
@@ -338,6 +501,10 @@ export function FlightImporter() {
 
         // Import without refreshing flight list (skipRefresh = true)
         const result = await importLog(item, true);
+        if (cancelRequestedRef.current) {
+          finalizeCancelledBatch();
+          return;
+        }
         if (!result.success) {
           if (result.message.toLowerCase().includes('already been imported')) {
             skipped += 1;
@@ -358,6 +525,11 @@ export function FlightImporter() {
             refreshFlightListBackground();
           }
         }
+      }
+
+      if (cancelRequestedRef.current) {
+        finalizeCancelledBatch();
+        return;
       }
 
       // Final refresh at the end
@@ -413,6 +585,10 @@ export function FlightImporter() {
         
         // Use skipRefresh=true to defer refresh until batch completes
         const result = await importLog(item, true);
+        if (cancelRequestedRef.current) {
+          finalizeCancelledBatch();
+          return;
+        }
         if (!result.success) {
           if (result.message.toLowerCase().includes('already been imported')) {
             skipped += 1;
@@ -439,8 +615,17 @@ export function FlightImporter() {
           // Only apply cooldown between successful imports (not on last)
           if (!isLast) {
             await runCooldown(5);
+            if (cancelRequestedRef.current) {
+              finalizeCancelledBatch();
+              return;
+            }
           }
         }
+      }
+
+      if (cancelRequestedRef.current) {
+        finalizeCancelledBatch();
+        return;
       }
 
       // Final refresh to ensure everything is up to date
@@ -470,8 +655,9 @@ export function FlightImporter() {
 
   // Handle file selection via dialog
   const handleBrowse = async () => {
-    if (isWebMode()) {
-      // Web mode: use HTML file input
+    // Use browser-style File objects on web and mobile runtimes.
+    // On Android this avoids path-only imports from content URIs.
+    if (isWebMode() || isMobileRuntime) {
       const files = await pickFiles(browseAcceptString, true);
       await processBatch(files);
     } else {
@@ -497,6 +683,83 @@ export function FlightImporter() {
       await processBatch(files);
     }
   };
+
+  const loadFilesFromSavedMobileDirectory = useCallback(async (): Promise<boolean> => {
+    const androidFsModule = await loadAndroidFsModule();
+    if (!androidFsModule || !androidFsModule.isAndroid()) return false;
+
+    const savedUri = getMobileSyncFolderUri();
+    if (!savedUri) return false;
+
+    const hasPersistedPermission = await androidFsModule.AndroidFs.checkPersistedPickerUriPermission(
+      savedUri,
+      androidFsModule.AndroidUriPermissionState.ReadOrWrite,
+    );
+    if (!hasPersistedPermission) return false;
+
+    const files = await listFilesFromAndroidUri(
+      androidFsModule.AndroidFs,
+      savedUri,
+      allowedExtensionSetRef.current,
+    );
+    if (files.length === 0) return false;
+
+    mobileSyncFilesRef.current = files;
+    setSyncFolderPath(savedUri.uri);
+    window.dispatchEvent(new CustomEvent('syncFolderChanged'));
+    return true;
+  }, []);
+
+  const selectMobileSyncFolder = useCallback(async (): Promise<boolean> => {
+    const androidFsModule = await loadAndroidFsModule();
+    if (androidFsModule && androidFsModule.isAndroid()) {
+      try {
+        const selectedUri = await androidFsModule.AndroidFs.showOpenDirPicker();
+        if (!selectedUri) return false;
+
+        await androidFsModule.AndroidFs.persistPickerUriPermission(selectedUri);
+
+        const files = await listFilesFromAndroidUri(
+          androidFsModule.AndroidFs,
+          selectedUri,
+          allowedExtensionSetRef.current,
+        );
+        if (files.length === 0) {
+          setBatchMessage(t('importer.noFlightLogs'));
+          return false;
+        }
+
+        setMobileSyncFolderUri(selectedUri);
+        mobileSyncFilesRef.current = files;
+        setSyncFolderPath(selectedUri.uri);
+        window.dispatchEvent(new CustomEvent('syncFolderChanged'));
+        return true;
+      } catch (error) {
+        console.warn('Android SAF folder picker failed, falling back to file selection:', error);
+      }
+    }
+
+    const selectedFiles = await pickFolderFiles(browseAcceptString);
+    const filteredFiles = selectedFiles.filter((file) => hasAllowedExtension(file.name, allowedExtensionSetRef.current));
+
+    if (filteredFiles.length === 0) {
+      if (selectedFiles.length > 0) {
+        setBatchMessage(t('importer.noFlightLogs'));
+      }
+      return false;
+    }
+
+    mobileSyncFilesRef.current = filteredFiles;
+
+    const relativePath = filteredFiles[0].webkitRelativePath || '';
+    const folderName = relativePath.includes('/')
+      ? relativePath.split('/')[0]
+      : 'selected-files';
+
+    setSyncFolderPath(`mobile://${folderName}`);
+    window.dispatchEvent(new CustomEvent('syncFolderChanged'));
+    return true;
+  }, [browseAcceptString, t]);
 
   // Handle drag and drop (web mode via react-dropzone)
   const onDrop = useCallback(
@@ -566,6 +829,24 @@ export function FlightImporter() {
       if (unlisten) unlisten();
     };
   }, [allowedExtensionSet]);
+
+  useEffect(() => {
+    const handleMobileSyncFolderRequest = async () => {
+      if (!isMobileRuntime || isWebMode()) return;
+      await selectMobileSyncFolder();
+    };
+
+    window.addEventListener('requestMobileSyncFolderSelection', handleMobileSyncFolderRequest as EventListener);
+    return () => {
+      window.removeEventListener('requestMobileSyncFolderSelection', handleMobileSyncFolderRequest as EventListener);
+    };
+  }, [isMobileRuntime, selectMobileSyncFolder]);
+
+  useEffect(() => {
+    if (!isMobileRuntime || isWebMode()) return;
+
+    void loadFilesFromSavedMobileDirectory();
+  }, [isMobileRuntime, loadFilesFromSavedMobileDirectory]);
 
   useEffect(() => {
     allowedExtensionSetRef.current = allowedExtensionSet;
@@ -732,6 +1013,42 @@ export function FlightImporter() {
       };
     }
     
+    if (isMobileRuntime && !isWebMode()) {
+      if (!getAutoscanEnabled()) return;
+
+      backgroundSyncTriggeredRef.current = true;
+      backgroundSyncAbortRef.current = false;
+
+      const runMobileStartupSync = async () => {
+        if (!getAutoscanEnabled()) return;
+
+        const hasSavedFolder = await loadFilesFromSavedMobileDirectory();
+        if (!hasSavedFolder) return;
+
+        if (backgroundSyncAbortRef.current) return;
+
+        logImporterEvent('Auto-scan on startup started (mobile mode).', {
+          syncFolderPath: getSyncFolderPath(),
+        });
+
+        await processBatchRef.current([...mobileSyncFilesRef.current], false);
+      };
+
+      const timeoutId = window.setTimeout(() => {
+        void scheduleBusyRetry(0, async () => {
+          await runMobileStartupSync();
+        });
+      }, STARTUP_DELAY_MS);
+      trackTimer(timeoutId);
+
+      return () => {
+        for (const timerId of startupTimersRef.current) {
+          clearTimeout(timerId);
+        }
+        startupTimersRef.current = [];
+      };
+    }
+
     // Desktop mode: only if sync folder is configured and autoscan enabled
     if (!getAutoscanEnabled()) return;
     
@@ -744,7 +1061,7 @@ export function FlightImporter() {
       if (!getAutoscanEnabled()) return;
 
       const folderPath = getSyncFolderPath();
-      if (!folderPath) return;
+      if (!folderPath || !isSyncFolderReadable(folderPath)) return;
 
       logImporterEvent('Auto-scan on startup started (desktop mode).', {
         folderPath,
@@ -775,7 +1092,7 @@ export function FlightImporter() {
             if (!entry.isFile || !entry.name) return false;
             return hasAllowedExtension(entry.name, allowedExtensionSetRef.current);
           })
-          .map((entry) => `${folderPath}/${entry.name}`);
+          .map((entry) => joinFolderPath(folderPath, entry.name!));
         
         if (logFiles.length === 0) {
           setIsBackgroundSyncing(false);
@@ -872,7 +1189,7 @@ export function FlightImporter() {
       }
       startupTimersRef.current = [];
     };
-  }, []);
+  }, [isMobileRuntime, loadFilesFromSavedMobileDirectory]);
 
   const isDragActive = webDragActive || tauriDragActive;
 
@@ -966,6 +1283,15 @@ export function FlightImporter() {
             errors++;
           }
         }
+
+        if (cancelRequestedRef.current) {
+          setIsBatchProcessing(false);
+          setCurrentFileName(null);
+          setBatchTotal(0);
+          setBatchIndex(0);
+          setBatchMessage('Sync canceled.');
+          return;
+        }
         
         setIsBatchProcessing(false);
         setCurrentFileName(null);
@@ -1004,13 +1330,33 @@ export function FlightImporter() {
       return;
     }
 
+    if (isMobileRuntime) {
+      if (mobileSyncFilesRef.current.length === 0) {
+        const restored = await loadFilesFromSavedMobileDirectory();
+        if (!restored) {
+          const selected = await selectMobileSyncFolder();
+          if (!selected || mobileSyncFilesRef.current.length === 0) {
+            setBatchMessage('NO_SYNC_FOLDER');
+            return;
+          }
+        }
+
+        if (mobileSyncFilesRef.current.length === 0) {
+          setBatchMessage('NO_SYNC_FOLDER');
+          return;
+        }
+      }
+
+      await processBatch([...mobileSyncFilesRef.current], false);
+      return;
+    }
+
     // Desktop mode: use local sync folder
     const folderPath = getSyncFolderPath();
     if (!folderPath) {
       setBatchMessage('NO_SYNC_FOLDER');
       return;
     }
-
     setIsSyncing(true);
     setBatchMessage(null);
 
@@ -1029,7 +1375,7 @@ export function FlightImporter() {
           if (!entry.isFile || !entry.name) return false;
           return hasAllowedExtension(entry.name, allowedExtensionSet);
         })
-        .map((entry) => `${folderPath}/${entry.name}`);
+        .map((entry) => joinFolderPath(folderPath, entry.name!));
 
       if (cancelRequestedRef.current) {
         setIsSyncing(false);
@@ -1170,6 +1516,8 @@ export function FlightImporter() {
                 disabled={isImporting || isBatchProcessing || isSyncing}
                 title={isWebMode() 
                   ? (webSyncPath ? `Sync from server: ${webSyncPath}` : 'Sync not configured on server')
+                  : isMobileRuntime
+                  ? 'Select files to sync from your device'
                   : (syncFolderPath ? `Sync from: ${getSyncFolderDisplayName()}` : 'Configure sync folder first')}
               >
                 <div className="flex items-center gap-1">

@@ -256,7 +256,7 @@ export function ManualEntryModal({ isOpen, onClose }: ManualEntryModalProps) {
   const altitudeUnit = unitPrefs.altitude === 'imperial' ? 'ft' : 'm';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-hidden">
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 overflow-hidden mobile-safe-container">
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/60 backdrop-blur-sm"
@@ -264,7 +264,7 @@ export function ManualEntryModal({ isOpen, onClose }: ManualEntryModalProps) {
       />
 
       {/* Modal */}
-      <div className="relative bg-drone-secondary rounded-xl border border-gray-700 shadow-2xl w-full max-w-2xl max-h-full grid grid-rows-[auto_1fr_auto]">
+      <div className="relative bg-drone-secondary rounded-xl border border-gray-700 shadow-2xl w-full max-w-2xl max-h-[calc(100vh-2rem)] modal-mobile-max grid grid-rows-[auto_1fr_auto]">
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-gray-700">
           <h2 className="text-lg font-semibold text-white">{t('manual.title')}</h2>

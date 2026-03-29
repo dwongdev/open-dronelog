@@ -7,7 +7,12 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useFlightStore } from '@/stores/flightStore';
 import { FlightList } from './FlightList';
-import { FlightImporter, getSyncFolderPath, setSyncFolderPath } from './FlightImporter';
+import {
+  FlightImporter,
+  getSyncFolderPath,
+  normalizeSyncFolderPath,
+  setSyncFolderPath,
+} from './FlightImporter';
 import { FlightStats } from './FlightStats';
 import { SettingsModal } from './SettingsModal';
 import { TelemetryCharts } from '@/components/charts/TelemetryCharts';
@@ -16,8 +21,10 @@ import { FlightMessagesModal } from './FlightMessagesModal';
 import { Overview } from './Overview';
 import { ProfileSelector } from './ProfileSelector';
 import { isWebMode } from '@/lib/api';
+import { useIsMobileRuntime } from '@/hooks/platform/useIsMobileRuntime';
 
 export function Dashboard() {
+  const isMobileRuntime = useIsMobileRuntime();
   const {
     currentFlightData,
     overviewStats,
@@ -187,7 +194,7 @@ export function Dashboard() {
       {/* Left Sidebar - Flight List */}
       {!isSidebarHidden && (
         <aside
-          className="bg-drone-secondary md:border-r border-gray-700 flex flex-col z-50 fixed inset-0 md:relative md:inset-auto"
+          className="bg-drone-secondary md:border-r border-gray-700 flex flex-col z-50 fixed inset-0 md:relative md:inset-auto mobile-safe-container"
           style={{ width: typeof window !== 'undefined' && window.innerWidth < 768 ? '100%' : sidebarWidth, minWidth: typeof window !== 'undefined' && window.innerWidth < 768 ? '100%' : 300 }}
         >
           <div className="p-4 border-b border-gray-700 flex items-center justify-between">
@@ -209,7 +216,7 @@ export function Dashboard() {
             <div className="flex items-center gap-1.5">
               {/* Supporter Badge */}
               {supporterBadgeActive && (
-                <div className="supporter-badge" title={t('dashboard.verifiedSupporter')}>
+                <div className="supporter-badge hidden md:block" title={t('dashboard.verifiedSupporter')}>
                   <div className="flex items-center justify-center w-9 h-9 rounded-md">
                     <svg className="w-8 h-8 supporter-star" viewBox="0 0 100 120" fill="none">
                       {/* Chevron body */}
@@ -329,6 +336,10 @@ export function Dashboard() {
                   <button
                     type="button"
                     onClick={async () => {
+                      if (isMobileRuntime) {
+                        window.dispatchEvent(new CustomEvent('requestMobileSyncFolderSelection'));
+                        return;
+                      }
                       try {
                         const { open } = await import('@tauri-apps/plugin-dialog');
                         const selected = await open({
@@ -336,8 +347,14 @@ export function Dashboard() {
                           multiple: false,
                           title: t('dashboard.selectSyncFolder'),
                         });
-                        if (selected && typeof selected === 'string') {
-                          setSyncFolderPath(selected);
+                        const selectedFolder =
+                          typeof selected === 'string'
+                            ? selected
+                            : Array.isArray(selected) && typeof selected[0] === 'string'
+                            ? selected[0]
+                            : null;
+                        if (selectedFolder) {
+                          setSyncFolderPath(normalizeSyncFolderPath(selectedFolder));
                           // Force re-render by triggering a state update
                           window.dispatchEvent(new CustomEvent('syncFolderChanged'));
                         }
@@ -448,7 +465,28 @@ export function Dashboard() {
             ‹
           </button>
           {/* Mobile close + settings buttons for sidebar */}
-          <div className="absolute right-4 top-4 flex items-center gap-2 z-50 md:hidden">
+          <div className="absolute right-4 mobile-safe-fixed-top flex items-center gap-2 z-50 md:hidden">
+            {supporterBadgeActive && (
+              <div className="supporter-badge" title={t('dashboard.verifiedSupporter')}>
+                <div className="flex items-center justify-center w-9 h-9 rounded-md">
+                  <svg className="w-8 h-8 supporter-star" viewBox="0 0 100 120" fill="none">
+                    <path d="M50 115L5 65L20 45L50 70L80 45L95 65Z" fill="url(#badge-grad-mobile)" />
+                    <path d="M15 55L50 85L85 55L75 40L50 60L25 40Z" fill="url(#badge-grad-mobile)" opacity="0.7" />
+                    <path d="M50 2L56.5 18L74 18L60 28L65 45L50 35L35 45L40 28L26 18L43.5 18Z" fill="url(#star-grad-mobile)" />
+                    <defs>
+                      <linearGradient id="badge-grad-mobile" x1="50" y1="40" x2="50" y2="115" gradientUnits="userSpaceOnUse">
+                        <stop offset="0%" stopColor="#f59e0b" />
+                        <stop offset="100%" stopColor="#d97706" />
+                      </linearGradient>
+                      <linearGradient id="star-grad-mobile" x1="50" y1="2" x2="50" y2="45" gradientUnits="userSpaceOnUse">
+                        <stop offset="0%" stopColor="#fbbf24" />
+                        <stop offset="100%" stopColor="#f59e0b" />
+                      </linearGradient>
+                    </defs>
+                  </svg>
+                </div>
+              </div>
+            )}
             <button
               onClick={() => { setIsSidebarHidden(true); setShowSettings(true); }}
               className="sidebar-mobile-btn border rounded-lg p-2 transition-colors"
@@ -490,7 +528,7 @@ export function Dashboard() {
 
       {/* Mobile Show Sidebar Button */}
       {isSidebarHidden && (
-        <div className="fixed bottom-6 right-6 z-40 md:hidden">
+        <div className="fixed right-6 mobile-safe-fixed-bottom z-40 md:hidden">
           <button
             onClick={() => setIsSidebarHidden(false)}
             className="p-4 bg-drone-primary text-white rounded-full shadow-lg flex items-center justify-center hover:bg-sky-400 transition-colors"

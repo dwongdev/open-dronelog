@@ -5,6 +5,7 @@ import { useFlightStore } from '@/stores/flightStore';
 import { Dashboard } from '@/components/dashboard/Dashboard';
 import { PasswordInput } from '@/components/ui/PasswordInput';
 import { isWebMode, unlockProfile } from '@/lib/api';
+import { useIsMobileRuntime } from '@/hooks/platform/useIsMobileRuntime';
 
 /** Loading overlay shown during database initialization/migration */
 function InitializationOverlay() {
@@ -360,6 +361,10 @@ function App() {
     if (typeof sessionStorage === 'undefined') return false;
     return sessionStorage.getItem('donationBannerDismissed') === 'true';
   });
+  const [isSmallScreen, setIsSmallScreen] = useState(
+    typeof window !== 'undefined' ? window.innerWidth < 768 : false,
+  );
+  const isMobileRuntime = useIsMobileRuntime();
 
   // Load flights on mount
   useEffect(() => {
@@ -431,8 +436,70 @@ function App() {
     }
   };
 
+  useEffect(() => {
+    const onResize = () => {
+      setIsSmallScreen(window.innerWidth < 768);
+    };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  useEffect(() => {
+    if (isWebMode() || !isMobileRuntime) return;
+
+    const originalWindowOpen = window.open.bind(window);
+
+    const openExternalUrl = async (href: string) => {
+      try {
+        const { openUrl } = await import('@tauri-apps/plugin-opener');
+        await openUrl(href);
+        return;
+      } catch {
+        // Fall through to shell/open fallback.
+      }
+
+      try {
+        const { open } = await import('@tauri-apps/plugin-shell');
+        await open(href);
+      } catch {
+        // Final fallback if native plugins are unavailable.
+        originalWindowOpen(href, '_blank', 'noopener,noreferrer');
+      }
+    };
+    const patchedWindowOpen: typeof window.open = ((url?: string | URL, target?: string, features?: string) => {
+      if (typeof url === 'string' && /^https?:\/\//i.test(url)) {
+        void openExternalUrl(url);
+        return null;
+      }
+      return originalWindowOpen(url as string | URL, target, features);
+    }) as typeof window.open;
+    window.open = patchedWindowOpen;
+
+    const handleExternalLink = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (!target) return;
+
+      const anchor = target.closest('a[href]') as HTMLAnchorElement | null;
+      if (!anchor) return;
+
+      const href = anchor.getAttribute('href') ?? '';
+      if (!/^https?:\/\//i.test(href)) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      void openExternalUrl(href);
+    };
+
+    document.addEventListener('click', handleExternalLink, true);
+    return () => {
+      window.open = originalWindowOpen;
+      document.removeEventListener('click', handleExternalLink, true);
+    };
+  }, [isMobileRuntime]);
+
+  const useCompactBanner = isMobileRuntime || isSmallScreen;
   return (
-    <div className="w-full h-full flex flex-col bg-drone-dark overflow-hidden">
+    <div className="w-full h-full flex flex-col bg-drone-dark overflow-hidden mobile-safe-container">
       {/* Initialization overlay - shown during DB migration or auth required */}
       {(!isFlightsInitialized || needsAuth) && <InitializationOverlay />}
 
@@ -445,29 +512,9 @@ function App() {
         >
           <div className="relative flex items-center w-full py-2.5 md:py-[17px]">
             {/* Scrolling marquee for mobile, centered static for desktop */}
-            <div className="marquee-container flex-1 overflow-hidden mx-8 md:mx-0">
-              <div className="marquee-content md:marquee-paused flex items-center gap-2 whitespace-nowrap text-[0.85rem] md:text-[1rem] md:justify-center md:whitespace-normal md:flex-wrap">
-                <span>
-                  {t('app.bannerText')}
-                </span>
-                <a
-                  href="https://github.com/arpanghosh8453/open-dronelog"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className={
-                    resolvedTheme === 'light'
-                      ? 'text-indigo-700 hover:underline font-semibold'
-                      : 'text-drone-primary hover:underline font-semibold'
-                  }
-                >
-                  GitHub
-                </a> {t('app.bannerBy')}
-                <span className={resolvedTheme === 'light' ? 'text-gray-500' : 'text-gray-400'}>
-                  •
-                </span>
-                <span>
-                  {t('app.bannerSupport')}
-                </span>
+            {useCompactBanner ? (
+              <div className="flex-1 text-center px-10 text-[0.9rem] font-medium">
+                <span>Support Open-DroneLog on </span>
                 <a
                   href="https://ko-fi.com/arpandesign"
                   target="_blank"
@@ -478,10 +525,48 @@ function App() {
                       : 'text-amber-300 hover:text-amber-200 hover:underline font-semibold'
                   }
                 >
-                  Ko-fi
+                  Ko-Fi
                 </a>
               </div>
-            </div>
+            ) : (
+              <div className="marquee-container flex-1 overflow-hidden mx-8 md:mx-0">
+                <div className="marquee-content md:marquee-paused flex items-center gap-2 whitespace-nowrap text-[0.85rem] md:text-[1rem] md:justify-center md:whitespace-normal md:flex-wrap">
+                  <span>
+                    {t('app.bannerText')}
+                  </span>
+                  <a
+                    href="https://github.com/arpanghosh8453/open-dronelog"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={
+                      resolvedTheme === 'light'
+                        ? 'text-indigo-700 hover:underline font-semibold'
+                        : 'text-drone-primary hover:underline font-semibold'
+                    }
+                  >
+                    GitHub
+                  </a> {t('app.bannerBy')}
+                  <span className={resolvedTheme === 'light' ? 'text-gray-500' : 'text-gray-400'}>
+                    •
+                  </span>
+                  <span>
+                    {t('app.bannerSupport')}
+                  </span>
+                  <a
+                    href="https://ko-fi.com/arpandesign"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={
+                      resolvedTheme === 'light'
+                        ? 'text-indigo-700 hover:underline font-semibold'
+                        : 'text-amber-300 hover:text-amber-200 hover:underline font-semibold'
+                    }
+                  >
+                    Ko-fi
+                  </a>
+                </div>
+              </div>
+            )}
             <button
               onClick={handleDismissBanner}
               className={`absolute right-2 md:right-4 rounded-md px-2 py-1.5 transition-colors flex-shrink-0 z-10 ${resolvedTheme === 'light'

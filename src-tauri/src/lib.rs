@@ -15,6 +15,16 @@ pub mod server;
 #[cfg(feature = "web")]
 pub mod session_store;
 
+#[cfg(feature = "tauri-app")]
+mod tauri_app;
+
+#[cfg(feature = "tauri-app")]
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+	// Reuse the existing Tauri bootstrap so desktop and mobile share one startup path.
+	tauri_app::run();
+}
+
 pub use database::Database;
 pub use models::*;
 pub use parser::LogParser;
