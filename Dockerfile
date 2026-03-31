@@ -51,7 +51,7 @@ RUN touch src/main.rs src/lib.rs && \
 # ---------------------------------------------------------------------------
 # Stage 2: Frontend build
 # ---------------------------------------------------------------------------
-FROM node:20-slim AS frontend-builder
+FROM node:22-slim AS frontend-builder
 
 WORKDIR /build
 
