@@ -584,7 +584,7 @@ export function Dashboard() {
         <aside className="w-[1.8rem] bg-drone-secondary border-r border-gray-700 flex items-start justify-center relative hidden md:flex">
           <button
             onClick={() => setIsSidebarHidden(false)}
-            className="mt-4 bg-drone-secondary border border-gray-700 rounded-full w-6 h-6 text-gray-300 hover:text-white"
+            className="sidebar-collapsed-toggle-btn mt-4 translate-x-1/2 border rounded-full w-[4rem] h-[3rem] text-lg leading-none flex items-center justify-center"
             title={t('dashboard.showSidebar')}
           >
             ›

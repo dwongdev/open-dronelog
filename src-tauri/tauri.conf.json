@@ -30,6 +30,9 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "android": {
+      "versionCode": 3000001
+    },
     "icon": [
       "icons/icon.png",
       "icons/icon.ico",
