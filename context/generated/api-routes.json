@@ -1,5 +1,5 @@
 {
-  "sourceFingerprint": "11f8577b055e648deee203eb3291e41b6975f173475d813c4b97355eebab2776",
+  "sourceFingerprint": "3314227bf7e326803710daf879c03bf04b8b42f41acd6ce63c22dad8e9686478",
   "sourceFile": "src-tauri/src/server.rs",
   "routes": [
     {
@@ -191,6 +191,11 @@
       "path": "/api/sync/blacklist",
       "method": "DELETE",
       "handler": "remove_sync_blacklist"
+    },
+    {
+      "path": "/api/sync/blacklist/details",
+      "method": "GET",
+      "handler": "get_sync_blacklist_details"
     },
     {
       "path": "/api/sync/blacklist/all",

@@ -488,6 +488,12 @@ body.overlay-active .overflow-y-auto {
   overflow: hidden !important;
 }
 
+/* Keep Settings modal internal scroll working even if overlay-active is set elsewhere */
+body.overlay-active .settings-scroll {
+  overflow-y: auto !important;
+  -webkit-overflow-scrolling: touch;
+}
+
 /* Custom scrollbar styling - Desktop only to preserve mobile native layout */
 @media (pointer: fine) {
   ::-webkit-scrollbar {

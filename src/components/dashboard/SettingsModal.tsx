@@ -4,15 +4,17 @@
 
 import { useState, useEffect, useRef, useTransition } from 'react';
 import { useTranslation } from 'react-i18next';
+import { sha256 } from 'js-sha256';
 import * as api from '@/lib/api';
 import { isWebMode, getKeepUploadSettings, setKeepUploadSettings, KeepUploadSettings } from '@/lib/api';
 import { useFlightStore } from '@/stores/flightStore';
 import { Select } from '@/components/ui/Select';
 import { PasswordInput } from '@/components/ui/PasswordInput';
-import { getBlacklist, clearBlacklist } from './FlightImporter';
+import { getBlacklist, getSyncFolderPath, removeFromBlacklist } from './FlightImporter';
 import { SMART_TAG_TYPES, getEnabledSmartTagTypes, setEnabledSmartTagTypes, SmartTagTypeId } from '@/lib/api';
 import { FaComments, FaDiscord, FaGithub } from 'react-icons/fa';
 import { FiBookOpen, FiGlobe, FiMail } from 'react-icons/fi';
+import { useIsMobileRuntime } from '@/hooks/platform/useIsMobileRuntime';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -25,9 +27,16 @@ interface BackupProgressEvent {
   stage: string;
 }
 
+interface SyncBlacklistEntryUi {
+  hash: string;
+  currentFilename: string | null;
+  isPresentInSyncFolder: boolean;
+}
+
 export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const { t } = useTranslation();
   const webMode = isWebMode();
+  const isMobileRuntime = useIsMobileRuntime();
   const [apiKey, setApiKey] = useState('');
   const [hasKey, setHasKey] = useState(false);
   const [apiKeyType, setApiKeyType] = useState<'none' | 'default' | 'personal'>('none');
@@ -36,8 +45,12 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [appLogDir, setAppLogDir] = useState('');
   const [appVersion, setAppVersion] = useState('');
   const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
-  const [confirmClearBlacklist, setConfirmClearBlacklist] = useState(false);
   const [blacklistCount, setBlacklistCount] = useState(0);
+  const [isBlacklistModalOpen, setIsBlacklistModalOpen] = useState(false);
+  const [isBlacklistScanning, setIsBlacklistScanning] = useState(false);
+  const [blacklistEntries, setBlacklistEntries] = useState<SyncBlacklistEntryUi[]>([]);
+  const [selectedBlacklistHashes, setSelectedBlacklistHashes] = useState<Set<string>>(new Set());
+  const [isClearingSelectedBlacklist, setIsClearingSelectedBlacklist] = useState(false);
   const [isBackingUp, setIsBackingUp] = useState(false);
   const [isRestoring, setIsRestoring] = useState(false);
   const [backupProgress, setBackupProgress] = useState<BackupProgressEvent | null>(null);
@@ -279,6 +292,238 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     }
   };
 
+  const shortenHash = (hash: string): string => {
+    if (hash.length <= 18) return hash;
+    return `${hash.slice(0, 8)}...${hash.slice(-8)}`;
+  };
+
+  const loadBlacklistEntriesForModal = async () => {
+    setIsBlacklistScanning(true);
+    setSelectedBlacklistHashes(new Set());
+
+    try {
+      const baseEntries = await api.getSyncBlacklistDetails();
+
+      if (webMode) {
+        setBlacklistEntries(baseEntries);
+        setBlacklistCount(baseEntries.length);
+        return;
+      }
+
+      const syncFolderPath = getSyncFolderPath();
+      if (!syncFolderPath) {
+        setBlacklistEntries(baseEntries);
+        setBlacklistCount(baseEntries.length);
+        return;
+      }
+
+      let allowedExtensionSet = new Set<string>();
+      try {
+        const allowedExtensions = await api.getAllowedLogExtensions();
+        allowedExtensionSet = new Set(
+          allowedExtensions.map((ext) => ext.trim().replace(/^\./, '').toLowerCase()).filter(Boolean)
+        );
+      } catch {
+        // Keep an empty set and skip extension filtering if extension discovery fails.
+      }
+
+      const normalizeExt = (fileName: string): string | null => {
+        const idx = fileName.lastIndexOf('.');
+        if (idx < 0 || idx === fileName.length - 1) return null;
+        return fileName.slice(idx + 1).toLowerCase();
+      };
+
+      const isAllowedByExtension = (fileName: string): boolean => {
+        if (allowedExtensionSet.size === 0) return true;
+        const ext = normalizeExt(fileName);
+        if (!ext) return false;
+        return allowedExtensionSet.has(ext);
+      };
+
+      const joinFolderPath = (folderPath: string, fileName: string): string => {
+        const trimmed = folderPath.replace(/[\\/]+$/, '');
+        return `${trimmed}/${fileName}`;
+      };
+
+      const baseHashSet = new Set(baseEntries.map((entry) => entry.hash));
+      const resolvedByHash = new Map<string, string>();
+
+      // Android mobile build uses persisted SAF URI permissions; resolve filenames via AndroidFs.
+      if (isMobileRuntime) {
+        try {
+          const savedUriRaw = typeof localStorage !== 'undefined' ? localStorage.getItem('mobileSyncFolderUri') : null;
+          const savedUri = savedUriRaw ? JSON.parse(savedUriRaw) as { uri?: string; documentTopTreeUri?: string | null } : null;
+
+          if (savedUri?.uri) {
+            const androidFsModule = await import('tauri-plugin-android-fs-api') as unknown as {
+              AndroidFs: {
+                readDir: (uri: { uri: string; documentTopTreeUri: string | null }) => Promise<Array<{ type: 'Dir' | 'File'; name: string; uri: { uri: string; documentTopTreeUri: string | null } }>>;
+                readFile: (uri: { uri: string; documentTopTreeUri: string | null }) => Promise<Uint8Array>;
+                checkPersistedPickerUriPermission: (uri: { uri: string; documentTopTreeUri: string | null }, state: string) => Promise<boolean>;
+              };
+              AndroidUriPermissionState: {
+                ReadOrWrite: string;
+              };
+            };
+
+            const hasPermission = await androidFsModule.AndroidFs
+              .checkPersistedPickerUriPermission(savedUri as { uri: string; documentTopTreeUri: string | null }, androidFsModule.AndroidUriPermissionState.ReadOrWrite)
+              .catch(() => false);
+
+            if (hasPermission) {
+              const files: Array<{ name: string; uri: { uri: string; documentTopTreeUri: string | null } }> = [];
+
+              const normalizeExt = (fileName: string): string | null => {
+                const idx = fileName.lastIndexOf('.');
+                if (idx < 0 || idx === fileName.length - 1) return null;
+                return fileName.slice(idx + 1).toLowerCase();
+              };
+
+              const isAllowedByExtension = (fileName: string): boolean => {
+                if (allowedExtensionSet.size === 0) return true;
+                const ext = normalizeExt(fileName);
+                if (!ext) return false;
+                return allowedExtensionSet.has(ext);
+              };
+
+              const walk = async (uri: { uri: string; documentTopTreeUri: string | null }) => {
+                const dirEntries = await androidFsModule.AndroidFs.readDir(uri);
+                for (const entry of dirEntries) {
+                  if (entry.type === 'Dir') {
+                    await walk(entry.uri);
+                    continue;
+                  }
+                  if (entry.type === 'File' && isAllowedByExtension(entry.name)) {
+                    files.push({ name: entry.name, uri: entry.uri });
+                  }
+                }
+              };
+
+              await walk(savedUri as { uri: string; documentTopTreeUri: string | null });
+              files.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+
+              for (const file of files) {
+                try {
+                  const content = await androidFsModule.AndroidFs.readFile(file.uri);
+                  const bytes = content instanceof Uint8Array ? content : new Uint8Array(content);
+                  const hash = sha256(bytes);
+                  if (!baseHashSet.has(hash)) continue;
+                  if (!resolvedByHash.has(hash)) {
+                    resolvedByHash.set(hash, file.name);
+                  }
+                } catch {
+                  continue;
+                }
+              }
+            }
+          }
+        } catch {
+          // Fall back to hash-only view if Android SAF access is unavailable.
+        }
+
+        const mergedEntries = baseEntries.map((entry) => {
+          const resolvedName = resolvedByHash.get(entry.hash) ?? null;
+          return {
+            ...entry,
+            currentFilename: resolvedName,
+            isPresentInSyncFolder: resolvedName !== null,
+          };
+        });
+
+        setBlacklistEntries(mergedEntries);
+        setBlacklistCount(mergedEntries.length);
+        return;
+      }
+
+      const { readDir } = await import('@tauri-apps/plugin-fs');
+      const entries = await readDir(syncFolderPath);
+
+      const candidateFiles = entries
+        .filter((entry) => entry.isFile && entry.name && isAllowedByExtension(entry.name))
+        .map((entry) => entry.name as string)
+        .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+
+      for (const name of candidateFiles) {
+        const filePath = joinFolderPath(syncFolderPath, name);
+        let hash: string;
+        try {
+          hash = await api.computeFileHash(filePath);
+        } catch {
+          continue;
+        }
+
+        if (!baseHashSet.has(hash)) continue;
+        if (!resolvedByHash.has(hash)) {
+          resolvedByHash.set(hash, name);
+        }
+      }
+
+      const mergedEntries = baseEntries.map((entry) => {
+        const resolvedName = resolvedByHash.get(entry.hash) ?? null;
+        return {
+          ...entry,
+          currentFilename: resolvedName,
+          isPresentInSyncFolder: resolvedName !== null,
+        };
+      });
+
+      setBlacklistEntries(mergedEntries);
+      setBlacklistCount(mergedEntries.length);
+    } catch {
+      // Keep modal functional even if scanning fails.
+      const baseEntries = await api.getSyncBlacklistDetails().catch(() => []);
+      setBlacklistEntries(baseEntries);
+      setBlacklistCount(baseEntries.length);
+    } finally {
+      setIsBlacklistScanning(false);
+    }
+  };
+
+  const openBlacklistModal = async () => {
+    setIsBlacklistModalOpen(true);
+    await loadBlacklistEntriesForModal();
+  };
+
+  const handleSelectAllBlacklist = () => {
+    setSelectedBlacklistHashes(new Set(blacklistEntries.map((entry) => entry.hash)));
+  };
+
+  const handleDeselectAllBlacklist = () => {
+    setSelectedBlacklistHashes(new Set());
+  };
+
+  const toggleBlacklistSelection = (hash: string) => {
+    setSelectedBlacklistHashes((prev) => {
+      const next = new Set(prev);
+      if (next.has(hash)) {
+        next.delete(hash);
+      } else {
+        next.add(hash);
+      }
+      return next;
+    });
+  };
+
+  const handleClearSelectedBlacklist = async () => {
+    if (selectedBlacklistHashes.size === 0) return;
+
+    setIsClearingSelectedBlacklist(true);
+    try {
+      const selected = Array.from(selectedBlacklistHashes);
+      await Promise.all(selected.map((hash) => removeFromBlacklist(hash)));
+
+      const nextEntries = blacklistEntries.filter((entry) => !selectedBlacklistHashes.has(entry.hash));
+      setBlacklistEntries(nextEntries);
+      setSelectedBlacklistHashes(new Set());
+      setBlacklistCount(nextEntries.length);
+      setMessage({ type: 'success', text: t('settings.blacklistSelectedCleared') });
+    } catch (err) {
+      setMessage({ type: 'error', text: t('settings.blacklistSelectedClearFailed', { error: String(err) }) });
+    } finally {
+      setIsClearingSelectedBlacklist(false);
+    }
+  };
+
   const handleSave = async () => {
     if (!apiKey.trim()) {
       setMessage({ type: 'error', text: t('settings.enterApiKey') });
@@ -375,6 +620,22 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       setBackupProgress(null);
     }
   };
+
+  const sortedBlacklistEntries = [...blacklistEntries].sort((a, b) => {
+    const aSelected = selectedBlacklistHashes.has(a.hash);
+    const bSelected = selectedBlacklistHashes.has(b.hash);
+
+    if (aSelected && !bSelected) return -1;
+    if (!aSelected && bSelected) return 1;
+
+    const aName = (a.currentFilename ?? '').toLowerCase();
+    const bName = (b.currentFilename ?? '').toLowerCase();
+
+    if (aName && bName) return aName.localeCompare(bName);
+    if (aName) return -1;
+    if (bName) return 1;
+    return a.hash.localeCompare(b.hash);
+  });
 
   if (!isOpen) return null;
 
@@ -1484,45 +1745,13 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   </button>
                 )}
 
-                {/* Clear Sync Blacklist */}
-                {blacklistCount > 0 && (
-                  <>
-                    {confirmClearBlacklist ? (
-                      <div className="mt-3 rounded-lg border border-amber-600/60 bg-amber-500/10 p-3">
-                        <p className="text-xs text-amber-200">
-                          {t('settings.clearBlacklistConfirm')}
-                        </p>
-                        <div className="mt-2 flex items-center gap-3">
-                          <button
-                            onClick={async () => {
-                              await clearBlacklist();
-                              setBlacklistCount(0);
-                              setConfirmClearBlacklist(false);
-                              setMessage({ type: 'success', text: 'Blacklist cleared.' });
-                            }}
-                            className="text-xs text-amber-300 hover:text-amber-200"
-                          >
-                            {t('flightList.yes')}
-                          </button>
-                          <button
-                            onClick={() => setConfirmClearBlacklist(false)}
-                            className="text-xs text-gray-400 hover:text-gray-200"
-                          >
-                            {t('flightList.cancel')}
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <button
-                        onClick={() => setConfirmClearBlacklist(true)}
-                        disabled={isBusy}
-                        className="mt-3 w-full py-2 px-3 rounded-lg border border-amber-600 text-amber-500 hover:bg-amber-500/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm"
-                      >
-                        {blacklistCount === 1 ? t('settings.clearBlacklist', { count: blacklistCount }) : t('settings.clearBlacklistPlural', { count: blacklistCount })}
-                      </button>
-                    )}
-                  </>
-                )}
+                <button
+                  onClick={openBlacklistModal}
+                  disabled={isBusy}
+                  className="mt-3 w-full py-2 px-3 rounded-lg border border-amber-600 text-amber-500 hover:bg-amber-500/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+                >
+                  {t('settings.manageBlacklistedLogs', { count: blacklistCount })}
+                </button>
               </div>
             </div>
           </div>
@@ -1530,6 +1759,142 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
         {/* Footer */}
       </div>
+
+      {/* Manage Sync Blacklist Modal */}
+      {isBlacklistModalOpen && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => {
+              if (!isBlacklistScanning && !isClearingSelectedBlacklist) {
+                setIsBlacklistModalOpen(false);
+              }
+            }}
+          />
+          <div className={`relative w-full max-w-3xl rounded-xl border shadow-2xl h-[min(88vh,760px)] max-h-[min(88vh,760px)] grid grid-rows-[auto_auto_minmax(0,1fr)_auto] overflow-hidden ${isLight ? 'bg-white border-gray-300' : 'bg-drone-secondary border-gray-700'}`}>
+            <div className={`flex items-center justify-between px-4 py-3 border-b ${isLight ? 'border-gray-200' : 'border-gray-700'}`}>
+              <div>
+                <h3 className={`text-base font-semibold ${isLight ? 'text-gray-900' : 'text-white'}`}>
+                  {t('settings.manageBlacklistedLogs', { count: blacklistCount })}
+                </h3>
+                <p className={`text-xs mt-0.5 ${isLight ? 'text-gray-500' : 'text-gray-400'}`}>
+                  {t('settings.blacklistManagerDescription')}
+                </p>
+                <p className={`text-xs mt-1 ${isLight ? 'text-gray-500' : 'text-gray-400'}`}>
+                  {t('settings.blacklistManagerFunctionality')}
+                </p>
+              </div>
+              <button
+                onClick={() => setIsBlacklistModalOpen(false)}
+                disabled={isBlacklistScanning || isClearingSelectedBlacklist}
+                className={`transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${isLight ? 'text-gray-500 hover:text-gray-800' : 'text-gray-400 hover:text-white'}`}
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className={`flex items-center justify-between px-4 py-2 border-b ${isLight ? 'border-gray-200 bg-gray-50' : 'border-gray-700 bg-drone-dark/50'}`}>
+              <div className="flex items-center gap-4 text-xs">
+                <button
+                  onClick={handleSelectAllBlacklist}
+                  disabled={isBlacklistScanning || blacklistEntries.length === 0}
+                  className={`${isLight ? 'text-sky-700 hover:text-sky-800' : 'text-sky-400 hover:text-sky-300'} disabled:opacity-40 disabled:cursor-not-allowed`}
+                >
+                  {t('settings.selectAll')}
+                </button>
+                <button
+                  onClick={handleDeselectAllBlacklist}
+                  disabled={isBlacklistScanning || selectedBlacklistHashes.size === 0}
+                  className={`${isLight ? 'text-gray-600 hover:text-gray-800' : 'text-gray-400 hover:text-gray-200'} disabled:opacity-40 disabled:cursor-not-allowed`}
+                >
+                  {t('settings.deselectAll')}
+                </button>
+              </div>
+              <div className={`text-xs ${isLight ? 'text-gray-600' : 'text-gray-400'}`}>
+                {t('settings.blacklistSelectedCount', { count: selectedBlacklistHashes.size })}
+              </div>
+            </div>
+
+            <div className={`settings-scroll min-h-0 overflow-y-auto p-3 ${isLight ? 'bg-white' : 'bg-drone-secondary'}`}>
+              {isBlacklistScanning ? (
+                <div className={`h-full min-h-[220px] flex flex-col items-center justify-center rounded-lg border ${isLight ? 'border-gray-200 bg-gray-50' : 'border-gray-700 bg-drone-dark/50'}`}>
+                  <svg className="w-8 h-8 text-drone-primary animate-spin" viewBox="0 0 24 24" fill="none">
+                    <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" className="opacity-25" />
+                    <path d="M4 12a8 8 0 018-8" stroke="currentColor" strokeWidth="3" strokeLinecap="round" className="opacity-75" />
+                  </svg>
+                  <p className={`mt-3 text-sm ${isLight ? 'text-gray-700' : 'text-gray-300'}`}>
+                    {t('settings.scanningSyncFolderForBlacklistedFiles')}
+                  </p>
+                </div>
+              ) : sortedBlacklistEntries.length === 0 ? (
+                <div className={`h-full min-h-[220px] flex items-center justify-center rounded-lg border text-sm ${isLight ? 'border-gray-200 bg-gray-50 text-gray-500' : 'border-gray-700 bg-drone-dark/50 text-gray-400'}`}>
+                  {t('settings.noBlacklistedLogsFound')}
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {sortedBlacklistEntries.map((entry) => {
+                    const checked = selectedBlacklistHashes.has(entry.hash);
+                    return (
+                      <label
+                        key={entry.hash}
+                        className={`w-full rounded-lg border px-3 py-2.5 grid grid-cols-[auto_1fr] gap-3 cursor-pointer transition-colors ${checked
+                          ? isLight
+                            ? 'border-sky-300 bg-sky-50'
+                            : 'border-sky-500/60 bg-sky-500/10'
+                          : isLight
+                            ? 'border-gray-200 bg-white hover:bg-gray-50'
+                            : 'border-gray-700 bg-drone-dark/40 hover:bg-drone-dark/60'
+                          }`}
+                      >
+                        <div className="pt-1">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggleBlacklistSelection(entry.hash)}
+                            className="w-4 h-4 accent-sky-500"
+                          />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <code className={`text-xs px-1.5 py-0.5 rounded ${isLight ? 'bg-gray-100 text-gray-700' : 'bg-gray-900 text-gray-300'}`}>
+                              {shortenHash(entry.hash)}
+                            </code>
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium border ${entry.isPresentInSyncFolder
+                              ? isLight
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                              : isLight
+                                ? 'bg-gray-100 text-gray-600 border-gray-200'
+                                : 'bg-gray-700/30 text-gray-300 border-gray-600'
+                              }`}>
+                              {entry.isPresentInSyncFolder ? t('settings.blacklistPresentInSyncFolder') : t('settings.blacklistNotPresentInSyncFolder')}
+                            </span>
+                          </div>
+                          <div className={`mt-1 text-sm truncate ${isLight ? 'text-gray-800' : 'text-gray-200'}`} title={entry.currentFilename ?? ''}>
+                            {entry.currentFilename ?? t('settings.blacklistUnresolvedFilename')}
+                          </div>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className={`px-4 py-3 border-t ${isLight ? 'border-gray-200 bg-gray-50' : 'border-gray-700 bg-drone-dark/50'}`}>
+              <button
+                onClick={handleClearSelectedBlacklist}
+                disabled={isBlacklistScanning || isClearingSelectedBlacklist || selectedBlacklistHashes.size === 0}
+                className="w-full py-2 px-3 rounded-lg border border-amber-600 text-amber-500 hover:bg-amber-500/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+              >
+                {isClearingSelectedBlacklist ? t('settings.clearingSelectedLogs') : t('settings.clearSelectedFromBlacklist')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Supporter Badge Activation Modal */}
       {showBadgeModal && (

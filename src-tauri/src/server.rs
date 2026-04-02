@@ -1347,6 +1347,20 @@ struct SyncBlacklistResponse {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+struct SyncBlacklistEntry {
+    hash: String,
+    current_filename: Option<String>,
+    is_present_in_sync_folder: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SyncBlacklistDetailsResponse {
+    entries: Vec<SyncBlacklistEntry>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct AllowedExtensionsResponse {
     extensions: Vec<String>,
 }
@@ -1403,6 +1417,84 @@ async fn get_sync_blacklist(
         .get_sync_blacklist_hashes()
         .map_err(|e| err_response(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to get sync blacklist: {}", e)))?;
     Ok(Json(SyncBlacklistResponse { hashes }))
+}
+
+/// GET /api/sync/blacklist/details — List blacklisted hashes with optional current filename resolution
+async fn get_sync_blacklist_details(
+    pdb: ProfileDb,
+) -> Result<Json<SyncBlacklistDetailsResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let hashes = pdb
+        .db
+        .get_sync_blacklist_hashes()
+        .map_err(|e| err_response(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to get sync blacklist: {}", e)))?;
+
+    if hashes.is_empty() {
+        return Ok(Json(SyncBlacklistDetailsResponse { entries: vec![] }));
+    }
+
+    let hash_set: std::collections::HashSet<String> = hashes.iter().cloned().collect();
+    let mut resolved_by_hash: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+
+    if let Some(sync_dir) = pdb.sync_path() {
+        if sync_dir.exists() {
+            if let Ok(entries) = std::fs::read_dir(&sync_dir) {
+                let allowed_extensions: std::collections::HashSet<String> = crate::plugins::get_allowed_extensions(&pdb.data_dir)
+                    .into_iter()
+                    .collect();
+
+                // Deterministic filename choice if multiple files happen to share one hash.
+                let mut candidates: Vec<(String, std::path::PathBuf)> = Vec::new();
+                for entry in entries.filter_map(|entry| entry.ok()) {
+                    let is_allowed_file = entry
+                        .file_type()
+                        .ok()
+                        .map(|file_type| {
+                            if !file_type.is_file() {
+                                return false;
+                            }
+                            let name = entry.file_name().to_string_lossy().to_string();
+                            has_allowed_extension(&name.to_ascii_lowercase(), &allowed_extensions)
+                        })
+                        .unwrap_or(false);
+
+                    if !is_allowed_file {
+                        continue;
+                    }
+
+                    candidates.push((entry.file_name().to_string_lossy().to_string(), entry.path()));
+                }
+
+                candidates.sort_by(|a, b| a.0.to_ascii_lowercase().cmp(&b.0.to_ascii_lowercase()));
+
+                for (filename, path) in candidates {
+                    let hash = match compute_file_hash(&path) {
+                        Ok(hash) => hash,
+                        Err(_) => continue,
+                    };
+
+                    if !hash_set.contains(&hash) {
+                        continue;
+                    }
+
+                    resolved_by_hash.entry(hash).or_insert(filename);
+                }
+            }
+        }
+    }
+
+    let entries = hashes
+        .into_iter()
+        .map(|hash| {
+            let current_filename = resolved_by_hash.get(&hash).cloned();
+            SyncBlacklistEntry {
+                hash,
+                is_present_in_sync_folder: current_filename.is_some(),
+                current_filename,
+            }
+        })
+        .collect();
+
+    Ok(Json(SyncBlacklistDetailsResponse { entries }))
 }
 
 /// POST /api/sync/blacklist — Add file hash to sync blacklist
@@ -2456,6 +2548,7 @@ pub fn build_router(state: WebAppState) -> Router {
         .route("/api/backup/restore", post(import_backup))
         .route("/api/sync/config", get(get_sync_config))
         .route("/api/sync/blacklist", get(get_sync_blacklist).post(add_sync_blacklist).delete(remove_sync_blacklist))
+        .route("/api/sync/blacklist/details", get(get_sync_blacklist_details))
         .route("/api/sync/blacklist/all", delete(clear_sync_blacklist))
         .route("/api/sync/log_event", post(sync_log_event))
         .route("/api/sync/files", get(get_sync_files))

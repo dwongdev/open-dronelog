@@ -799,6 +799,16 @@ export interface SyncBlacklistResponse {
   hashes: string[];
 }
 
+export interface SyncBlacklistEntry {
+  hash: string;
+  currentFilename: string | null;
+  isPresentInSyncFolder: boolean;
+}
+
+export interface SyncBlacklistDetailsResponse {
+  entries: SyncBlacklistEntry[];
+}
+
 /**
  * Get the sync folder configuration (web mode only).
  * Returns the configured SYNC_LOGS_PATH if set on the server.
@@ -829,6 +839,24 @@ export async function getSyncBlacklist(): Promise<string[]> {
   }
   const invoke = await getTauriInvoke();
   return invoke('get_sync_blacklist') as Promise<string[]>;
+}
+
+/**
+ * Get blacklist entries with optional sync-folder filename resolution.
+ * Existing hash-only endpoints remain unchanged; this is additive.
+ */
+export async function getSyncBlacklistDetails(): Promise<SyncBlacklistEntry[]> {
+  if (isWeb) {
+    const result = await fetchJson<SyncBlacklistDetailsResponse>('/sync/blacklist/details');
+    return result.entries;
+  }
+
+  const hashes = await getSyncBlacklist();
+  return hashes.map((hash) => ({
+    hash,
+    currentFilename: null,
+    isPresentInSyncFolder: false,
+  }));
 }
 
 /** Add a hash to the persisted sync blacklist. */
