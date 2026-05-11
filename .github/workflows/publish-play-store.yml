@@ -16,7 +16,7 @@ on:
       track:
         description: "Google Play track"
         required: true
-        default: "alpha"
+        default: "production"
         type: choice
         options:
           - internal
@@ -183,7 +183,7 @@ jobs:
           if [ "${{ github.event_name }}" = "release" ]; then
             # Default automatic release behavior: full production rollout.
             PACKAGE_NAME="com.opendronelog"
-            TRACK="alpha"
+            TRACK="production"
             RELEASE_STATUS="completed"
             CHANGES_NOT_SENT_FOR_REVIEW="false"
             ROLLOUT_FRACTION="1.00"
